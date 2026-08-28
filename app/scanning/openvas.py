@@ -1,0 +1,254 @@
+import os
+import time
+
+from app.config import settings
+from app.database import SessionLocal
+from app.models import Asset, Finding, ScanEngine, normalize_severity
+from app.scanning.common import is_cancelled, update_scan_status, utcnow, validate_target
+
+
+def _wait_for_openvas_socket(se: ScanEngine, db) -> None:
+    path = settings.openvas_socket_path
+    if os.path.exists(path):
+        pass
+    else:
+        waited = 0
+        while not os.path.exists(path) and waited < settings.openvas_socket_wait_seconds:
+            time.sleep(5)
+            waited += 5
+            se.progress = f"Waiting for OpenVAS socket ({waited}/{settings.openvas_socket_wait_seconds}s)..."
+            db.commit()
+        if not os.path.exists(path):
+            raise Exception(f"OpenVAS socket missing at {path} after {settings.openvas_socket_wait_seconds}s.")
+
+    if not os.access(path, os.R_OK | os.W_OK):
+        raise Exception(f"Permission denied to OpenVAS socket {path}.")
+
+
+def _get_port_list_id(gmp):
+    res = gmp.get_port_lists(filter_string=f"name={settings.openvas_port_list_name}")
+    ids = res.xpath("port_list/@id")
+    if not ids:
+        raise Exception(f"OpenVAS: could not find port list '{settings.openvas_port_list_name}'")
+    return ids[0]
+
+
+def _get_scan_config_id(gmp):
+    res = gmp.get_scan_configs(filter_string=f"name={settings.openvas_scan_config_name}")
+    ids = res.xpath("config/@id")
+    if not ids:
+        raise Exception(f"OpenVAS: could not find scan config '{settings.openvas_scan_config_name}'")
+    return ids[0]
+
+
+def _get_scanner_id(gmp):
+    res = gmp.get_scanners(filter_string=f"name={settings.openvas_scanner_name}")
+    ids = res.xpath("scanner/@id")
+    if not ids:
+        raise Exception(f"OpenVAS: could not find scanner '{settings.openvas_scanner_name}'")
+    return ids[0]
+
+
+def _poll_openvas_task(gmp, task_id: str, scan_id: int, se: ScanEngine, db) -> None:
+    deadline = time.time() + settings.openvas_poll_timeout_seconds
+    while True:
+        if is_cancelled(scan_id):
+            try:
+                gmp.stop_task(task_id)
+            except Exception:
+                pass
+            raise _Canceled()
+
+        task = gmp.get_task(task_id)
+        status = task.xpath("//status")[0].text
+
+        progress_node = task.xpath("//progress")
+        if progress_node and progress_node[0].text and progress_node[0].text.isdigit():
+            val = int(progress_node[0].text)
+            if val > 0:
+                se.progress_pct = min(99, max(20, val))
+                db.commit()
+
+        if status in ("Done", "Stopped"):
+            return
+        if status in ("Interrupted", "Failed", "Error"):
+            raise Exception(f"OpenVAS task ended with status: {status}")
+        if time.time() > deadline:
+            raise Exception(f"OpenVAS task timed out after {settings.openvas_poll_timeout_seconds}s (status: {status}).")
+        time.sleep(5)
+
+
+def _save_openvas_results(results, scan_id: int, asset_id: int, db) -> int:
+    count = 0
+    for result in results.xpath("//result"):
+        severity_node = result.find("threat")
+        severity = normalize_severity(severity_node.text if severity_node is not None else "")
+
+        desc_node = result.find("description")
+        desc = desc_node.text if desc_node is not None else ""
+
+        cve = ""
+        nvt = result.find("nvt")
+        if nvt is not None:
+            cve_node = nvt.find("cve")
+            if cve_node is not None and cve_node.text and cve_node.text != "NOCVE":
+                cve = cve_node.text
+
+        finding = Finding(
+            scan_id=scan_id,
+            asset_id=asset_id,
+            engine="openvas",
+            severity=severity,
+            cve=cve,
+            description=(desc or "").strip(),
+            recommendation="",
+        )
+        db.add(finding)
+        count += 1
+    return count
+
+
+class _Canceled(Exception):
+    pass
+
+
+def _run_openvas_scan(scan_id: int, asset_id: int, target: str, se: ScanEngine, db) -> None:
+    from gvm.connections import UnixSocketConnection
+    from gvm.protocols.gmp import Gmp
+    from gvm.transforms import EtreeTransform
+
+    try:
+        from gvm.protocols.gmp.requests.v224 import AliveTest
+    except ImportError:
+        AliveTest = None
+
+    _wait_for_openvas_socket(se, db)
+
+    connection = UnixSocketConnection(path=settings.openvas_socket_path)
+    transform = EtreeTransform()
+
+    with Gmp(connection=connection, transform=transform) as gmp:
+        gmp.authenticate(settings.openvas_username, settings.openvas_password)
+
+        port_list_id = _get_port_list_id(gmp)
+        config_id = _get_scan_config_id(gmp)
+        scanner_id = _get_scanner_id(gmp)
+
+        se.progress = f"Creating OpenVAS target {target}..."
+        se.progress_pct = 10
+        db.commit()
+
+        kwargs = dict(name=f"Target-{target}-{scan_id}-{asset_id}", hosts=[target], port_list_id=port_list_id)
+        if AliveTest is not None:
+            kwargs["alive_test"] = AliveTest.SCAN_CONFIG_DEFAULT
+
+        res = gmp.create_target(**kwargs)
+        if res.get("status") != "201":
+            raise Exception(f"OpenVAS create_target failed: {res.get('status_text')}")
+        target_id = res.xpath("//@id")[0]
+
+        se.progress = "Creating OpenVAS task..."
+        se.progress_pct = 15
+        db.commit()
+
+        res = gmp.create_task(
+            name=f"Task-{target}-{scan_id}-{asset_id}",
+            config_id=config_id,
+            target_id=target_id,
+            scanner_id=scanner_id,
+        )
+        if res.get("status") != "201":
+            raise Exception(f"OpenVAS create_task failed: {res.get('status_text')}")
+        task_id = res.xpath("//@id")[0]
+
+        se.openvas_task_id = task_id
+        db.commit()
+
+        res = gmp.start_task(task_id)
+        if res.get("status") != "202":
+            raise Exception(f"OpenVAS start_task failed: {res.get('status_text')}")
+        report_id = res.xpath("//report_id")[0].text
+
+        se.progress = "Polling OpenVAS task..."
+        se.progress_pct = 20
+        db.commit()
+
+        _poll_openvas_task(gmp, task_id, scan_id, se, db)
+
+        se.progress = "Parsing OpenVAS results..."
+        se.progress_pct = 99
+        db.commit()
+
+        results = gmp.get_results(filter_string=f"report_id={report_id}")
+        report_xml = gmp.get_report(report_id)
+
+        host_node = report_xml.xpath("//report/report/host")
+        if not host_node and not results.xpath("//result"):
+            raise Exception(f"OpenVAS: target '{target}' was considered dead or unreachable.")
+
+        count = _save_openvas_results(results, scan_id, asset_id, db)
+        db.commit()
+
+        se.progress = f"OpenVAS completed for {target} ({count} findings)."
+        se.progress_pct = 100
+        db.commit()
+
+
+def run_openvas_engine(scan_id: int, asset_ids: list[int]) -> None:
+    """Runs OpenVAS against all scan targets independently. All exceptions are
+    caught and recorded on the ScanEngine row — never re-raised. A failure
+    here never affects the Nuclei engine."""
+    db = SessionLocal()
+    try:
+        se = db.query(ScanEngine).filter_by(scan_id=scan_id, engine="openvas").first()
+        if not se:
+            return
+
+        se.status = "running"
+        se.started_at = utcnow()
+        se.progress = "Initializing OpenVAS..."
+        se.progress_pct = 5
+        db.commit()
+
+        final_status = "completed"
+        try:
+            for asset_id in asset_ids:
+                if is_cancelled(scan_id):
+                    final_status = "canceled"
+                    break
+
+                asset = db.get(Asset, asset_id)
+                if not asset:
+                    continue
+                target = asset.ip_address or asset.hostname
+                if not target:
+                    continue
+
+                validate_target(target)
+                _run_openvas_scan(scan_id, asset_id, target, se, db)
+
+            if final_status == "completed":
+                se.progress = "OpenVAS scan completed"
+                se.progress_pct = 100
+            else:
+                se.progress = "Canceled by user"
+        except _Canceled:
+            db.rollback()
+            final_status = "canceled"
+            se.progress = "Canceled by user"
+        except Exception as exc:  # noqa: BLE001 - deliberately broad, recorded not raised
+            db.rollback()
+            final_status = "failed"
+            se.error_message = str(exc)
+            se.progress = "Failed"
+        finally:
+            se.finished_at = utcnow()
+            db.expire(se, ["status"])
+            if se.status == "canceled":
+                db.rollback()
+            else:
+                se.status = final_status
+                db.commit()
+            update_scan_status(scan_id, db)
+    finally:
+        db.close()

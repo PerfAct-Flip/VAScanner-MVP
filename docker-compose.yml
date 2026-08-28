@@ -1,0 +1,59 @@
+services:
+  backend:
+    build: .
+    ports:
+      - "8088:8000"
+    environment:
+      - DATABASE_URL=postgresql://scanner:scanner@db:5432/scanner
+      - OPENVAS_SOCKET_PATH=/run/gvmd/gvmd.sock
+      - OPENVAS_USERNAME=admin
+      - OPENVAS_PASSWORD=admin
+    volumes:
+      - gvmd_socket:/run/gvmd
+    depends_on:
+      db:
+        condition: service_healthy
+      openvas:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=scanner
+      - POSTGRES_PASSWORD=scanner
+      - POSTGRES_DB=scanner
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scanner"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # All-in-one GVM/OpenVAS stack (gvmd + ospd-openvas + feeds) exposing gvmd's
+  # control socket over a shared volume. First boot syncs vulnerability feeds
+  # and can take a long time — SKIPSYNC=true skips that for fast local testing;
+  # set it to false (and be patient) for real vulnerability coverage.
+  openvas:
+    image: immauss/openvas:latest
+    ports:
+      - "9392:9392"
+    environment:
+      - PUBLIC_HOSTNAME=localhost
+      - SKIPSYNC=true
+      - USERNAME=admin
+      - PASSWORD=admin
+    volumes:
+      - gvmd_socket:/run/gvmd
+      - gvmd_data:/data
+
+volumes:
+  postgres_data:
+  gvmd_socket:
+  gvmd_data:
