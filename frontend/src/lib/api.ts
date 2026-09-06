@@ -1,0 +1,97 @@
+import type {
+  Agent,
+  Asset,
+  AssetCreate,
+  Finding,
+  Scan,
+  ScanCreate,
+  ScanFindings,
+  ScanStatus,
+} from "@/lib/types";
+
+const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
+
+class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...init?.headers,
+    },
+  });
+
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const body = await res.json();
+      detail = body?.detail ? JSON.stringify(body.detail) : detail;
+    } catch {
+      // ignore body parse failure
+    }
+    throw new ApiError(res.status, detail);
+  }
+
+  if (res.status === 204) return undefined as T;
+  return res.json() as Promise<T>;
+}
+
+export const api = {
+  // Assets
+  listAssets: () => request<Asset[]>("/api/v1/assets"),
+  getAsset: (id: number) => request<Asset>(`/api/v1/assets/${id}`),
+  createAsset: (payload: AssetCreate) =>
+    request<Asset>("/api/v1/assets", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  deleteAsset: (id: number) =>
+    request<void>(`/api/v1/assets/${id}`, { method: "DELETE" }),
+
+  // Scans
+  listScans: () => request<Scan[]>("/api/v1/scans"),
+  getScan: (id: number) => request<Scan>(`/api/v1/scans/${id}`),
+  createScan: (payload: ScanCreate) =>
+    request<Scan>("/api/v1/scans", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  getScanStatus: (id: number) => request<ScanStatus>(`/api/v1/scans/${id}/status`),
+  getScanFindings: (id: number) => request<ScanFindings>(`/api/v1/scans/${id}/findings`),
+  cancelScan: (id: number) =>
+    request<Scan>(`/api/v1/scans/${id}/cancel`, { method: "POST" }),
+
+  // Findings
+  listFindings: (params: {
+    scan_id?: number;
+    asset_id?: number;
+    engine?: string;
+    severity?: string;
+  }) => {
+    const search = new URLSearchParams();
+    if (params.scan_id !== undefined) search.set("scan_id", String(params.scan_id));
+    if (params.asset_id !== undefined) search.set("asset_id", String(params.asset_id));
+    if (params.engine) search.set("engine", params.engine);
+    if (params.severity) search.set("severity", params.severity);
+    const qs = search.toString();
+    return request<Finding[]>(`/api/v1/findings${qs ? `?${qs}` : ""}`);
+  },
+
+  // Reports
+  reportCsvUrl: (scanId?: number) =>
+    `${BASE_URL}/api/v1/reports/csv${scanId ? `?scan_id=${scanId}` : ""}`,
+  reportPdfUrl: (scanId?: number) =>
+    `${BASE_URL}/api/v1/reports/pdf${scanId ? `?scan_id=${scanId}` : ""}`,
+
+  // Agents
+  listAgents: () => request<Agent[]>("/api/v1/agents"),
+};
+
+export { ApiError };

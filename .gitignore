@@ -3,3 +3,9 @@ __pycache__/
 *.pyc
 .env
 scanner.db
+
+# frontend/
+frontend/node_modules
+frontend/dist
+frontend/dist-ssr
+*.local

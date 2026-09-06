@@ -1,3 +1,15 @@
+# ---- Frontend build ----
+FROM oven/bun:1 AS frontend-build
+
+WORKDIR /frontend
+
+COPY frontend/package.json frontend/bun.lock ./
+RUN bun install --frozen-lockfile
+
+COPY frontend/ ./
+RUN bun run build
+
+# ---- Backend ----
 FROM python:3.12-slim-bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -25,6 +37,7 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-install-project
 
 COPY app ./app
+COPY --from=frontend-build /frontend/dist ./static
 
 ENV PATH="/app/.venv/bin:${PATH}" \
     NUCLEI_BINARY=/usr/local/bin/nuclei \
