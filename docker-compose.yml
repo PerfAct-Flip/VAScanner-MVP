@@ -1,6 +1,7 @@
 services:
   backend:
     build: .
+    restart: unless-stopped
     ports:
       - "8088:8000"
     environment:
@@ -24,6 +25,7 @@ services:
 
   db:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       - POSTGRES_USER=scanner
       - POSTGRES_PASSWORD=scanner
@@ -42,6 +44,7 @@ services:
   # set it to false (and be patient) for real vulnerability coverage.
   openvas:
     image: immauss/openvas:latest
+    restart: unless-stopped
     ports:
       - "9392:9392"
     environment:
