@@ -4,7 +4,7 @@ import paramiko
 
 _WEAK_CIPHERS = ("arcfour", "cbc", "3des", "blowfish", "des")
 _WEAK_MACS = ("hmac-md5", "hmac-sha1", "hmac-sha1-96", "hmac-md5-96")
-_WEAK_KEX = ("diffie-hellman-group1", "diffie-hellman-group14-sha1", "diffie-hellman-group-exchange-sha1")
+_WEAK_KEX = ("diffie-hellman-group1-sha1", "diffie-hellman-group14-sha1", "diffie-hellman-group-exchange-sha1")
 
 
 def _try_exec(client: paramiko.SSHClient, command: str, timeout: int) -> str | None:
