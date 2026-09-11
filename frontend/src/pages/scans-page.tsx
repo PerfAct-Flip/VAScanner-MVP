@@ -48,8 +48,14 @@ interface CredentialRow {
   port: string;
 }
 
+// crypto.randomUUID() only exists in secure contexts (HTTPS/localhost) — this
+// app is served over plain HTTP on a bare IP, where it's undefined and throws.
+function newRowId(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 function emptyCredentialRow(): CredentialRow {
-  return { id: crypto.randomUUID(), type: "ssh", username: "", secret: "", port: "" };
+  return { id: newRowId(), type: "ssh", username: "", secret: "", port: "" };
 }
 
 function NewScanDialog() {
