@@ -19,12 +19,18 @@ works from behind a normal firewall/NAT with no port-forwarding needed.
   this whole agent exists to solve, meaning a full GVM stack per customer
   site). Instead, this is a lightweight authenticated SSH audit: for each
   target, it tries every SSH credential attached to the scan, and on a
-  successful login checks for a handful of concrete, high-signal issues —
-  `PermitRootLogin`/`PasswordAuthentication` in `sshd_config`, and pending
-  package updates (`apt`/`dnf`/`yum`). Not a CVE-database scanner, but real
-  credentialed checks against real hosts. If no SSH credential is attached
-  to the scan, this job fails immediately with a clear message instead of
-  hanging.
+  successful login checks for a handful of concrete, high-signal issues:
+  effective `PermitRootLogin`/`PasswordAuthentication` (via `sshd -T`,
+  falling back to reading `sshd_config` directly if that's not available),
+  weak SSH ciphers/MACs/key-exchange algorithms, pending package updates
+  (`apt`/`dnf`/`yum`), an old-looking kernel version, accounts with no
+  password set, unrestricted passwordless sudo for the audited account, and
+  listening TCP ports (informational). Several of these only produce a
+  finding if the audited account has sudo — that's fine, they just
+  contribute nothing rather than failing the audit. Not a CVE-database
+  scanner, but real credentialed checks against real hosts. If no SSH
+  credential is attached to the scan, this job fails immediately with a
+  clear message instead of hanging.
 
 ## Requirements
 
