@@ -14,9 +14,17 @@ works from behind a normal firewall/NAT with no port-forwarding needed.
   live hosts, reports them back — the backend turns each into an `Asset`.
 - **`nuclei`**: runs Nuclei against whatever assets the scan has (discovered
   and/or pre-seeded), reports findings back.
-- **`openvas`**: not implemented yet — jobs of this type are immediately
-  reported as failed with a clear message, so the scan doesn't hang forever
-  waiting on them.
+- **`openvas`**: *not* real OpenVAS/GVM (that would need its own scanner
+  engine with network access to the targets — the same reachability problem
+  this whole agent exists to solve, meaning a full GVM stack per customer
+  site). Instead, this is a lightweight authenticated SSH audit: for each
+  target, it tries every SSH credential attached to the scan, and on a
+  successful login checks for a handful of concrete, high-signal issues —
+  `PermitRootLogin`/`PasswordAuthentication` in `sshd_config`, and pending
+  package updates (`apt`/`dnf`/`yum`). Not a CVE-database scanner, but real
+  credentialed checks against real hosts. If no SSH credential is attached
+  to the scan, this job fails immediately with a clear message instead of
+  hanging.
 
 ## Requirements
 
@@ -24,12 +32,28 @@ works from behind a normal firewall/NAT with no port-forwarding needed.
 - [`nmap`](https://nmap.org/) on `PATH` (for discovery)
 - [`nuclei`](https://github.com/projectdiscovery/nuclei) on `PATH` (for scanning)
 - Network access to the backend's `BACKEND_URL`
+- Network access to whatever host(s) you attach an SSH credential for (for
+  the authenticated audit) — no extra binary needed, this uses `paramiko`
 
 For the most accurate discovery, run as root/administrator — `nmap -sn` uses
 ARP for local subnets when it can, which is faster and more reliable than the
 ICMP/TCP fallback used otherwise.
 
-## Setup
+## Setup (Docker — recommended for customers)
+
+Everything (Python, nmap, nuclei) is baked into a single image — no manual dependency
+installation needed.
+
+```bash
+docker build -t presence-agent:local .
+```
+
+Then open `setup.html` in a browser (just double-click it, no server needed) — fill in
+the backend URL and a site name, and it generates the exact `docker run` command to use,
+including the flags that matter (`--network host` so the container sees the real
+network, `--cap-add` for accurate ARP-based discovery).
+
+## Setup (without Docker)
 
 ```bash
 cd agent
@@ -55,11 +79,15 @@ identity under a different `AGENT_NAME` rather than recovering the old one.
    {
      "type": "internal",
      "agent_id": <that id>,
-     "credentials": []
+     "credentials": [
+       {"type": "ssh", "username": "someuser", "secret": "somepassword", "port": 22}
+     ]
    }
    ```
    `asset_ids` can be omitted entirely — discovery populates targets. Any
    pre-seeded `asset_ids` are scanned in addition to whatever gets discovered.
+   `credentials` is only used by the `openvas` (SSH audit) engine — omit it
+   (or pass `[]`) if you only want discovery + Nuclei.
 
 ## Running it as a persistent service
 

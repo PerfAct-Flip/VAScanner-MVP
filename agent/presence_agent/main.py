@@ -1,7 +1,7 @@
 import time
 import traceback
 
-from . import discovery, nuclei_runner
+from . import discovery, nuclei_runner, ssh_audit
 from .client import BackendClient
 from .config import Config
 from .identity import load_or_register
@@ -44,7 +44,64 @@ def handle_nuclei(client: BackendClient, cfg: Config, job: dict) -> None:
 
 
 def handle_openvas(client: BackendClient, cfg: Config, job: dict) -> None:
-    client.complete(job["scan_engine_id"], status="failed", error_message="OpenVAS is not yet implemented on this agent.")
+    """Real OpenVAS/GVM would need its own scanner engine running with
+    network access to the targets — the same reachability problem this
+    whole agent exists to solve, which would mean deploying a full GVM
+    stack on every customer site. Instead: a lightweight authenticated SSH
+    audit using whatever SSH credentials the scan was given (see
+    ssh_audit.py) — not a CVE-database scanner, but real credentialed
+    checks (weak sshd config, pending package updates) against real hosts."""
+    se_id = job["scan_engine_id"]
+    ssh_creds = [c for c in job.get("credentials", []) if c.get("type") == "ssh"]
+    targets = job.get("targets", [])
+
+    if not ssh_creds:
+        client.complete(
+            se_id,
+            status="failed",
+            error_message="No SSH credentials provided. (Full OpenVAS/GVM scanning is not implemented on this "
+            "agent — this engine performs a lightweight authenticated SSH audit instead, which needs "
+            "at least one SSH credential attached to the scan.)",
+        )
+        return
+
+    total = (len(targets) * len(ssh_creds)) or 1
+    attempt = 0
+    any_success = False
+    last_error: str | None = None
+
+    for t in targets:
+        host = t.get("ip_address") or t.get("hostname")
+        if not host:
+            continue
+        for cred in ssh_creds:
+            attempt += 1
+            canceled = client.progress(
+                se_id, progress=f"SSH audit: trying {host} ({attempt}/{total})", progress_pct=int(attempt / total * 90)
+            )
+            if canceled:
+                return
+
+            try:
+                findings = ssh_audit.audit_host(
+                    host, cred["username"], cred["secret"], cred.get("port"), cfg.ssh_audit_timeout_seconds
+                )
+            except Exception as exc:
+                last_error = f"{host}: {exc}"
+                continue  # this credential just didn't work for this host — try the next one, not fatal
+
+            any_success = True
+            if findings:
+                client.submit_findings(se_id, [{**f, "asset_id": t["asset_id"]} for f in findings])
+
+    if any_success:
+        client.complete(se_id, status="completed")
+    else:
+        client.complete(
+            se_id,
+            status="failed",
+            error_message=f"Could not authenticate via SSH to any target with the provided credential(s). Last error: {last_error}",
+        )
 
 
 HANDLERS = {"discover": handle_discover, "nuclei": handle_nuclei, "openvas": handle_openvas}

@@ -18,6 +18,7 @@ class Config:
     nuclei_tags: str
     nuclei_severity: str
     nuclei_timeout_seconds: int
+    ssh_audit_timeout_seconds: int
     state_path: Path
 
     @classmethod
@@ -40,5 +41,6 @@ class Config:
             nuclei_tags=os.environ.get("NUCLEI_TAGS", "cve,misconfig"),
             nuclei_severity=os.environ.get("NUCLEI_SEVERITY", "critical,high,medium,low"),
             nuclei_timeout_seconds=int(os.environ.get("NUCLEI_TIMEOUT_SECONDS", 600)),
+            ssh_audit_timeout_seconds=int(os.environ.get("SSH_AUDIT_TIMEOUT_SECONDS", 20)),
             state_path=Path(state_path).expanduser() if state_path else DEFAULT_STATE_PATH,
         )

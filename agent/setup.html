@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Presence Agent Setup</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f7f8;
+    --card: #ffffff;
+    --border: #e2e2e6;
+    --text: #1a1a1f;
+    --muted: #6b6b76;
+    --accent: #4f46e5;
+    --accent-text: #ffffff;
+    --code-bg: #16161d;
+    --code-text: #e8e8ee;
+    --ok: #1a7f37;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f0f13;
+      --card: #17171d;
+      --border: #2a2a33;
+      --text: #eeeeF2;
+      --muted: #9a9aa5;
+      --accent: #818cf8;
+      --accent-text: #14142b;
+      --code-bg: #0a0a0d;
+      --code-text: #dcdce6;
+      --ok: #4ade80;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f0f13;
+    --card: #17171d;
+    --border: #2a2a33;
+    --text: #eeeeF2;
+    --muted: #9a9aa5;
+    --accent: #818cf8;
+    --accent-text: #14142b;
+    --code-bg: #0a0a0d;
+    --code-text: #dcdce6;
+    --ok: #4ade80;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding-block: 32px;
+    padding-inline: 16px;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 28px; font-size: 0.95rem; }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 20px;
+  }
+  .card h2 {
+    font-size: 1rem;
+    margin: 0 0 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .step-num {
+    background: var(--accent);
+    color: var(--accent-text);
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+
+  label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-bottom: 6px;
+    margin-top: 16px;
+  }
+  label:first-of-type { margin-top: 0; }
+  .hint { font-weight: 400; color: var(--muted); font-size: 0.8rem; display: block; margin-top: 2px; }
+
+  input[type="text"] {
+    width: 100%;
+    padding: 9px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 0.9rem;
+    font-family: inherit;
+  }
+  input[type="text"]:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: -1px;
+  }
+
+  details { margin-top: 16px; }
+  summary {
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--muted);
+  }
+  details[open] summary { margin-bottom: 4px; }
+
+  pre {
+    background: var(--code-bg);
+    color: var(--code-text);
+    border-radius: 8px;
+    padding: 16px;
+    overflow-x: auto;
+    font-size: 0.82rem;
+    line-height: 1.6;
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .pre-wrap { position: relative; }
+  .copy-btn {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: var(--accent);
+    color: var(--accent-text);
+    border: none;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .copy-btn:active { transform: translateY(1px); }
+  .copy-btn.copied { background: var(--ok); }
+
+  .note {
+    font-size: 0.82rem;
+    color: var(--muted);
+    margin-top: 10px;
+    line-height: 1.5;
+  }
+  .note strong { color: var(--text); }
+
+  code.inline {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 0.85em;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Presence Agent Setup</h1>
+  <p class="sub">Fill in the fields below, then copy the generated command onto a machine already inside your network.</p>
+
+  <div class="card">
+    <h2><span class="step-num">1</span> Configuration</h2>
+
+    <label for="backendUrl">Backend URL
+      <span class="hint">Where the scanner platform is hosted — you were given this by whoever set it up.</span>
+    </label>
+    <input type="text" id="backendUrl" placeholder="http://157.173.222.154" />
+
+    <label for="agentName">Site name
+      <span class="hint">A short, unique name for this network/location (e.g. the office or site it's running at).</span>
+    </label>
+    <input type="text" id="agentName" placeholder="main-office" />
+
+    <details>
+      <summary>Advanced options</summary>
+      <label for="containerName">Container name</label>
+      <input type="text" id="containerName" value="presence-agent" />
+      <label for="volumeName">Data volume name
+        <span class="hint">Keeps this agent's identity across restarts — don't change this once it's running.</span>
+      </label>
+      <input type="text" id="volumeName" value="presence-agent-data" />
+      <label for="imageName">Image</label>
+      <input type="text" id="imageName" value="presence-agent:local" />
+    </details>
+  </div>
+
+  <div class="card">
+    <h2><span class="step-num">2</span> Run this on the machine</h2>
+    <p class="note">This machine must already be on the network you want scanned (plugged into the same office
+      Wi-Fi/Ethernet), and needs <a href="https://docs.docker.com/engine/install/" target="_blank" rel="noopener">Docker</a> installed.</p>
+    <div class="pre-wrap">
+      <button class="copy-btn" onclick="copyCmd(this)">Copy</button>
+      <pre id="cmdOut"></pre>
+    </div>
+    <p class="note">
+      <strong>--network host</strong> is required, not optional — it's what lets the container see your actual
+      network instead of an isolated Docker network. <strong>--cap-add</strong> flags let it do accurate device
+      discovery (ARP scanning).
+    </p>
+  </div>
+
+  <div class="card">
+    <h2><span class="step-num">3</span> Confirm it's running</h2>
+    <div class="pre-wrap">
+      <button class="copy-btn" onclick="copyLogs(this)">Copy</button>
+      <pre id="logsCmd"></pre>
+    </div>
+    <p class="note">You should see <code class="inline">Registered as agent_id=...</code> followed by
+      <code class="inline">Presence Agent running as agent_id=..., polling ...</code>. Once that shows up, this
+      site's name will appear as a selectable agent when starting an internal scan.</p>
+  </div>
+</div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const fields = ["backendUrl", "agentName", "containerName", "volumeName", "imageName"];
+
+  function render() {
+    const backendUrl = $("backendUrl").value.trim() || "http://YOUR-SERVER-HERE";
+    const agentName = $("agentName").value.trim() || "YOUR-SITE-NAME";
+    const containerName = $("containerName").value.trim() || "presence-agent";
+    const volumeName = $("volumeName").value.trim() || "presence-agent-data";
+    const imageName = $("imageName").value.trim() || "presence-agent:local";
+
+    $("cmdOut").textContent =
+`docker run -d \\
+  --name ${containerName} \\
+  --network host \\
+  --cap-add=NET_ADMIN --cap-add=NET_RAW \\
+  --restart unless-stopped \\
+  -e BACKEND_URL=${backendUrl} \\
+  -e AGENT_NAME=${agentName} \\
+  -v ${volumeName}:/data \\
+  ${imageName}`;
+
+    $("logsCmd").textContent = `docker logs -f ${containerName}`;
+  }
+
+  fields.forEach((id) => $(id).addEventListener("input", render));
+  render();
+
+  function copyCmd(btn) { copy($("cmdOut").textContent, btn); }
+  function copyLogs(btn) { copy($("logsCmd").textContent, btn); }
+
+  function copy(text, btn) {
+    navigator.clipboard.writeText(text).then(() => {
+      const original = btn.textContent;
+      btn.textContent = "Copied!";
+      btn.classList.add("copied");
+      setTimeout(() => { btn.textContent = original; btn.classList.remove("copied"); }, 1500);
+    }).catch(() => {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    });
+  }
+</script>
+</body>
+</html>

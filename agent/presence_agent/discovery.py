@@ -6,12 +6,21 @@ import xml.etree.ElementTree as ET
 import psutil
 
 
+# Virtual/container bridge interfaces (Docker, libvirt, VPN tunnels) aren't
+# part of the customer's actual network — they're local to the agent's own
+# host, and Docker's default /16 bridges are large enough to make a ping
+# sweep of them alone blow past any reasonable discovery timeout.
+_VIRTUAL_INTERFACE_PREFIXES = ("docker", "br-", "veth", "virbr", "tun", "tap")
+
+
 def local_subnets() -> list[str]:
-    """CIDRs for every active, non-loopback IPv4 interface. Wi-Fi and wired
-    both show up here the same way, so discovery covers whichever link(s)
-    happen to be up without needing to know or care which."""
+    """CIDRs for every active, non-loopback, non-virtual IPv4 interface.
+    Wi-Fi and wired both show up here the same way, so discovery covers
+    whichever link(s) happen to be up without needing to know or care which."""
     nets: set[str] = set()
-    for addrs in psutil.net_if_addrs().values():
+    for iface_name, addrs in psutil.net_if_addrs().items():
+        if iface_name.startswith(_VIRTUAL_INTERFACE_PREFIXES):
+            continue
         for addr in addrs:
             if addr.family.name != "AF_INET" or not addr.netmask:
                 continue
@@ -21,7 +30,7 @@ def local_subnets() -> list[str]:
                 network = ipaddress.ip_network(f"{addr.address}/{addr.netmask}", strict=False)
             except ValueError:
                 continue
-            if network.num_addresses > 65536:
+            if network.num_addresses > 4096:
                 # A misconfigured netmask shouldn't turn into an hours-long sweep.
                 continue
             nets.add(str(network))
