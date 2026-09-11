@@ -6,7 +6,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.database import Base, engine
 from app.routers import agents, assets, findings, reports, scans
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
@@ -14,7 +13,10 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    Base.metadata.create_all(bind=engine)
+    # Schema is entirely Alembic's responsibility now (see migrations/) — run
+    # `alembic upgrade head` before starting the app. The Docker image does
+    # this automatically on every container start; for local dev, run it
+    # once after pulling schema changes.
     yield
 
 

@@ -37,6 +37,8 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-install-project
 
 COPY app ./app
+COPY alembic.ini ./
+COPY migrations ./migrations
 COPY --from=frontend-build /frontend/dist ./static
 
 ENV PATH="/app/.venv/bin:${PATH}" \
@@ -45,4 +47,7 @@ ENV PATH="/app/.venv/bin:${PATH}" \
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Applies any pending migrations before every container start — idempotent
+# (alembic tracks what's already applied), so this is safe to run on every
+# boot including restarts where nothing changed.
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]

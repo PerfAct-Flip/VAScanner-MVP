@@ -18,6 +18,8 @@ broken by — whatever happens to be on the host's `PATH`.
 docker compose up -d --build
 ```
 
+- Schema migrations (Alembic, see `migrations/`) run automatically on every container
+  start, before the app boots — nothing to do here even after pulling schema changes.
 - API: http://localhost:8088 (Swagger UI: http://localhost:8088/docs)
 - First boot only: the `openvas` container restores its base vulnerability database —
   this is CPU-heavy and can take **10–20 minutes**. Watch it with:
@@ -35,6 +37,7 @@ docker compose up -d --build
 ```bash
 uv sync
 cp .env.example .env   # defaults to a local SQLite file, no external services required
+uv run alembic upgrade head   # creates/updates the schema — rerun after pulling any migration changes
 uv run uvicorn app.main:app --reload
 ```
 

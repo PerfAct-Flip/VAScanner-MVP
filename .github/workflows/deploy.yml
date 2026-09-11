@@ -19,5 +19,17 @@ jobs:
             cd ${{ secrets.DEPLOY_PATH }}
             git fetch origin main
             git reset --hard origin/main
+
+            # One-time secret: generated only if missing, then left alone
+            # forever — regenerating it would make existing encrypted scan
+            # credentials permanently undecryptable.
+            if ! grep -q '^CREDENTIAL_ENCRYPTION_KEY=' .env 2>/dev/null; then
+              KEY=$(openssl rand -base64 32 | tr '+/' '-_')
+              echo "CREDENTIAL_ENCRYPTION_KEY=${KEY}" >> .env
+            fi
+
+            # Schema migrations run automatically inside the backend
+            # container's own startup (see Dockerfile: alembic upgrade head
+            # runs before uvicorn) — nothing to do for them here.
             docker compose up -d --build
             docker image prune -f
