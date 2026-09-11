@@ -3,9 +3,9 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
 from app.models import Agent, Asset, Credential, Finding, Scan, ScanEngine, ScanTarget
-from app.scanning.common import request_cancel
+from app.scanning.common import clear_cancel, request_cancel
 from app.scanning.crypto import encrypt_secret
-from app.scanning.orchestrator import ENGINES, execute_scan
+from app.scanning.orchestrator import ENGINES, execute_scan, retry_external_engines
 from app.schemas import FindingOut, ScanCreate, ScanEngineStatusOut, ScanFindingsOut, ScanOut, ScanStatusOut
 
 router = APIRouter(prefix="/api/v1/scans", tags=["scans"])
@@ -153,3 +153,49 @@ def cancel_scan(scan_id: int, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(scan)
     return scan
+
+
+@router.post("/{scan_id}/retry", response_model=ScanOut)
+def retry_scan(scan_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    scan = db.query(Scan).options(joinedload(Scan.engines)).filter(Scan.id == scan_id).first()
+    if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    if scan.status != "failed":
+        raise HTTPException(status_code=409, detail=f"Only failed scans can be retried (current status: '{scan.status}')")
+
+    failed_engines = [se for se in scan.engines if se.status == "failed"]
+    if not failed_engines:
+        raise HTTPException(status_code=409, detail="No failed engines to retry")
+
+    # Reset only the engines that actually failed — one already-completed
+    # (e.g. Nuclei succeeded, only OpenVAS failed) is left untouched, so a
+    # retry never redoes or duplicates work that already succeeded.
+    retried_engine_names: set[str] = set()
+    for se in failed_engines:
+        se.status = "queued"
+        se.progress = "Queued"
+        se.progress_pct = 0
+        se.error_message = None
+        se.started_at = None
+        se.finished_at = None
+        se.claimed_at = None
+        retried_engine_names.add(se.engine)
+
+    clear_cancel(scan_id)
+    scan.status = "running"
+    scan.end_time = None
+    db.commit()
+    db.refresh(scan)
+
+    if scan.type == "external":
+        asset_ids = [st.asset_id for st in db.query(ScanTarget).filter_by(scan_id=scan_id).all()]
+        background_tasks.add_task(retry_external_engines, scan_id, asset_ids, retried_engine_names)
+    # Internal: nothing to trigger here — the engine(s) are now 'queued' again
+    # and the pinned agent will pick them up on its next poll.
+
+    return (
+        db.query(Scan)
+        .options(joinedload(Scan.engines))
+        .filter(Scan.id == scan.id)
+        .first()
+    )

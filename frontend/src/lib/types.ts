@@ -38,10 +38,20 @@ export interface Scan {
   engines: ScanEngine[];
 }
 
+export type CredentialType = "ssh" | "winrm" | "snmp";
+
+export interface CredentialCreate {
+  type: CredentialType;
+  username: string;
+  secret: string;
+  port?: number;
+}
+
 export interface ScanCreate {
   type: ScanType;
   asset_ids: number[];
   agent_id?: number;
+  credentials?: CredentialCreate[];
 }
 
 export interface ScanEngineStatus {

@@ -67,3 +67,16 @@ export function useCancelScan() {
     onError: (err: Error) => toast.error(`Failed to cancel scan: ${err.message}`),
   });
 }
+
+export function useRetryScan() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.retryScan(id),
+    onSuccess: (_, id) => {
+      queryClient.invalidateQueries({ queryKey: ["scans"] });
+      queryClient.invalidateQueries({ queryKey: ["scans", id] });
+      toast.success("Retrying failed engine(s)");
+    },
+    onError: (err: Error) => toast.error(`Failed to retry scan: ${err.message}`),
+  });
+}

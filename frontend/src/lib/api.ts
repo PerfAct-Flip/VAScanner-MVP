@@ -67,6 +67,8 @@ export const api = {
   getScanFindings: (id: number) => request<ScanFindings>(`/api/v1/scans/${id}/findings`),
   cancelScan: (id: number) =>
     request<Scan>(`/api/v1/scans/${id}/cancel`, { method: "POST" }),
+  retryScan: (id: number) =>
+    request<Scan>(`/api/v1/scans/${id}/retry`, { method: "POST" }),
 
   // Findings
   listFindings: (params: {

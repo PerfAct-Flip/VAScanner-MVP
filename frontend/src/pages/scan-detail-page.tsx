@@ -1,4 +1,4 @@
-import { ArrowLeft, Download, FileText, XCircle } from "lucide-react";
+import { ArrowLeft, Download, FileText, RotateCcw, XCircle } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
 
 import { SeverityBadge } from "@/components/severity-badge";
@@ -16,7 +16,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useCancelScan, useScan, useScanFindings } from "@/hooks/use-scans";
+import { useCancelScan, useRetryScan, useScan, useScanFindings } from "@/hooks/use-scans";
 import { api } from "@/lib/api";
 import type { Finding } from "@/lib/types";
 
@@ -113,6 +113,7 @@ export function ScanDetailPage() {
   const { data: scan, isLoading } = useScan(scanId);
   const { data: findings } = useScanFindings(scanId);
   const cancelScan = useCancelScan();
+  const retryScan = useRetryScan();
 
   if (isLoading || !scan) {
     return (
@@ -128,6 +129,7 @@ export function ScanDetailPage() {
     (a, b) => engineOrder.indexOf(a.engine) - engineOrder.indexOf(b.engine),
   );
   const canCancel = scan.status === "queued" || scan.status === "running";
+  const canRetry = scan.status === "failed";
 
   return (
     <div>
@@ -159,6 +161,16 @@ export function ScanDetailPage() {
             >
               <XCircle className="size-4" />
               Cancel scan
+            </Button>
+          )}
+          {canRetry && (
+            <Button
+              variant="outline"
+              onClick={() => retryScan.mutate(scan.id)}
+              disabled={retryScan.isPending}
+            >
+              <RotateCcw className="size-4" />
+              Retry failed
             </Button>
           )}
           <Button variant="outline" render={<a href={api.reportCsvUrl(scan.id)} />}>

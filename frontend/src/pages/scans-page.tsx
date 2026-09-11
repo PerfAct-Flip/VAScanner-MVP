@@ -1,4 +1,4 @@
-import { Plus } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { Link } from "react-router-dom";
 
@@ -16,6 +16,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -36,14 +37,27 @@ import {
 } from "@/components/ui/table";
 import { useAgents } from "@/hooks/use-agents";
 import { useAssets } from "@/hooks/use-assets";
-import { useCreateScan, useScans } from "@/hooks/use-scans";
-import type { ScanType } from "@/lib/types";
+import { useCreateScan, useRetryScan, useScans } from "@/hooks/use-scans";
+import type { CredentialType, ScanType } from "@/lib/types";
+
+interface CredentialRow {
+  id: string;
+  type: CredentialType;
+  username: string;
+  secret: string;
+  port: string;
+}
+
+function emptyCredentialRow(): CredentialRow {
+  return { id: crypto.randomUUID(), type: "ssh", username: "", secret: "", port: "" };
+}
 
 function NewScanDialog() {
   const [open, setOpen] = useState(false);
   const [type, setType] = useState<ScanType>("external");
   const [assetIds, setAssetIds] = useState<number[]>([]);
   const [agentId, setAgentId] = useState<string>("");
+  const [credentials, setCredentials] = useState<CredentialRow[]>([]);
   const { data: assets, isLoading: assetsLoading } = useAssets();
   const { data: agents, isLoading: agentsLoading } = useAgents();
   const createScan = useCreateScan();
@@ -56,18 +70,37 @@ function NewScanDialog() {
     setAssetIds((prev) => (checked ? [...prev, id] : prev.filter((a) => a !== id)));
   }
 
+  function updateCredential(id: string, patch: Partial<CredentialRow>) {
+    setCredentials((prev) => prev.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+  }
+
+  function removeCredential(id: string) {
+    setCredentials((prev) => prev.filter((c) => c.id !== id));
+  }
+
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!canSubmit) return;
+
+    const validCredentials = credentials
+      .filter((c) => c.username.trim() !== "" && c.secret !== "")
+      .map((c) => ({
+        type: c.type,
+        username: c.username.trim(),
+        secret: c.secret,
+        ...(c.port.trim() !== "" ? { port: Number(c.port) } : {}),
+      }));
+
     createScan.mutate(
       isInternal
-        ? { type, asset_ids: assetIds, agent_id: Number(agentId) }
+        ? { type, asset_ids: assetIds, agent_id: Number(agentId), credentials: validCredentials }
         : { type, asset_ids: assetIds },
       {
         onSuccess: () => {
           setOpen(false);
           setAssetIds([]);
           setAgentId("");
+          setCredentials([]);
         },
       },
     );
@@ -171,6 +204,70 @@ function NewScanDialog() {
                 </ScrollArea>
               )}
             </div>
+
+            {isInternal && (
+              <div className="grid gap-2">
+                <div className="flex items-center justify-between">
+                  <Label>Credentials (optional)</Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCredentials((prev) => [...prev, emptyCredentialRow()])}
+                  >
+                    <Plus className="size-4" />
+                    Add credential
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Used for authenticated checks (SSH config, pending updates) against discovered
+                  hosts. Each credential is tried against every target — leave empty to skip.
+                </p>
+                {credentials.map((cred) => (
+                  <div key={cred.id} className="grid grid-cols-[100px_1fr_1fr_80px_auto] gap-2 rounded-md border p-2">
+                    <Select
+                      value={cred.type}
+                      onValueChange={(v) => updateCredential(cred.id, { type: (v ?? "ssh") as CredentialType })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ssh">SSH</SelectItem>
+                        <SelectItem value="winrm">WinRM</SelectItem>
+                        <SelectItem value="snmp">SNMP</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      placeholder="Username"
+                      value={cred.username}
+                      onChange={(e) => updateCredential(cred.id, { username: e.target.value })}
+                    />
+                    <Input
+                      type="password"
+                      placeholder="Password"
+                      value={cred.secret}
+                      onChange={(e) => updateCredential(cred.id, { secret: e.target.value })}
+                    />
+                    <Input
+                      placeholder="Port"
+                      inputMode="numeric"
+                      value={cred.port}
+                      onChange={(e) => updateCredential(cred.id, { port: e.target.value })}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => removeCredential(cred.id)}
+                      aria-label="Remove credential"
+                    >
+                      <X className="size-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <DialogFooter>
@@ -186,6 +283,7 @@ function NewScanDialog() {
 
 export function ScansPage() {
   const { data: scans, isLoading } = useScans();
+  const retryScan = useRetryScan();
 
   return (
     <div>
@@ -241,9 +339,21 @@ export function ScansPage() {
                         {scan.start_time ? new Date(scan.start_time).toLocaleString() : "—"}
                       </TableCell>
                       <TableCell>
-                        <Button variant="outline" size="sm" render={<Link to={`/scans/${scan.id}`} />}>
-                          View
-                        </Button>
+                        <div className="flex justify-end gap-2">
+                          {scan.status === "failed" && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => retryScan.mutate(scan.id)}
+                              disabled={retryScan.isPending}
+                            >
+                              Retry
+                            </Button>
+                          )}
+                          <Button variant="outline" size="sm" render={<Link to={`/scans/${scan.id}`} />}>
+                            View
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   );

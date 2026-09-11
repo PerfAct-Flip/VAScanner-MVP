@@ -53,3 +53,18 @@ async def execute_scan(scan_id: int, asset_ids: list[int]) -> None:
         asyncio.to_thread(run_openvas_engine, scan_id, asset_ids),
         return_exceptions=True,
     )
+
+
+async def retry_external_engines(scan_id: int, asset_ids: list[int], engines: set[str]) -> None:
+    """Re-runs only the given (previously failed, already reset to 'queued')
+    engines for an external scan. Engines not in this set are left alone, so
+    retrying one failed engine never redoes another that already succeeded."""
+    clear_cancel(scan_id)
+
+    tasks = []
+    if "nuclei" in engines:
+        tasks.append(asyncio.to_thread(run_nuclei_engine, scan_id, asset_ids))
+    if "openvas" in engines:
+        tasks.append(asyncio.to_thread(run_openvas_engine, scan_id, asset_ids))
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
