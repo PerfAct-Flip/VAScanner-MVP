@@ -2,10 +2,11 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
-from app.models import Asset, Finding, Scan, ScanEngine, ScanTarget
+from app.models import Agent, Asset, Credential, Finding, Scan, ScanEngine, ScanTarget
 from app.scanning.common import request_cancel
+from app.scanning.crypto import encrypt_secret
 from app.scanning.orchestrator import ENGINES, execute_scan
-from app.schemas import ScanCreate, ScanEngineStatusOut, ScanFindingsOut, ScanOut, ScanStatusOut
+from app.schemas import FindingOut, ScanCreate, ScanEngineStatusOut, ScanFindingsOut, ScanOut, ScanStatusOut
 
 router = APIRouter(prefix="/api/v1/scans", tags=["scans"])
 
@@ -18,6 +19,11 @@ def create_scan(payload: ScanCreate, background_tasks: BackgroundTasks, db: Sess
     if missing:
         raise HTTPException(status_code=404, detail=f"Unknown asset_ids: {sorted(missing)}")
 
+    if payload.type == "internal":
+        agent = db.get(Agent, payload.agent_id)
+        if not agent or agent.type != "internal":
+            raise HTTPException(status_code=404, detail=f"Unknown internal agent_id: {payload.agent_id}")
+
     scan = Scan(type=payload.type, status="queued")
     db.add(scan)
     db.flush()
@@ -25,14 +31,40 @@ def create_scan(payload: ScanCreate, background_tasks: BackgroundTasks, db: Sess
     for asset_id in payload.asset_ids:
         db.add(ScanTarget(scan_id=scan.id, asset_id=asset_id))
 
-    for engine_name in ENGINES:
-        db.add(ScanEngine(scan_id=scan.id, engine=engine_name, status="queued", progress="Queued", progress_pct=0))
+    if payload.type == "external":
+        for engine_name in ENGINES:
+            db.add(ScanEngine(scan_id=scan.id, engine=engine_name, status="queued", progress="Queued", progress_pct=0))
+    else:
+        # Internal scans start with a single discovery job pinned to the
+        # chosen agent; nuclei/openvas jobs only get queued once discovery
+        # reports back what's actually alive on that network (see
+        # POST /agents/jobs/{id}/complete).
+        db.add(
+            ScanEngine(
+                scan_id=scan.id,
+                engine="discover",
+                status="queued",
+                progress="Queued",
+                progress_pct=0,
+                agent_id=payload.agent_id,
+            )
+        )
+        for cred in payload.credentials:
+            db.add(
+                Credential(
+                    scan_id=scan.id,
+                    type=cred.type,
+                    username=cred.username,
+                    secret_encrypted=encrypt_secret(cred.secret),
+                    port=cred.port,
+                )
+            )
 
     db.commit()
     db.refresh(scan)
 
-    # Nuclei and OpenVAS run as independent parallel jobs; the request returns
-    # immediately, poll GET /scans/{id}/status for live per-engine progress.
+    # External: Nuclei and OpenVAS run as independent parallel jobs right away.
+    # Internal: this just flips the scan to 'running' — the agent does the work.
     background_tasks.add_task(execute_scan, scan.id, list(found_ids))
 
     return (
@@ -63,7 +95,7 @@ def scan_status(scan_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Scan not found")
 
     engines = db.query(ScanEngine).filter_by(scan_id=scan_id).all()
-    engine_data = {}
+    engine_data: dict[str, ScanEngineStatusOut] = {}
     for se in engines:
         findings_count = db.query(Finding).filter_by(scan_id=scan_id, engine=se.engine).count()
         engine_data[se.engine] = ScanEngineStatusOut(
@@ -88,7 +120,11 @@ def scan_findings(scan_id: int, db: Session = Depends(get_db)):
     nuclei = db.query(Finding).filter_by(scan_id=scan_id, engine="nuclei").order_by(Finding.created_at.desc()).all()
     openvas = db.query(Finding).filter_by(scan_id=scan_id, engine="openvas").order_by(Finding.created_at.desc()).all()
 
-    return ScanFindingsOut(scan_id=scan_id, nuclei=nuclei, openvas=openvas)
+    return ScanFindingsOut(
+        scan_id=scan_id,
+        nuclei=[FindingOut.model_validate(f) for f in nuclei],
+        openvas=[FindingOut.model_validate(f) for f in openvas],
+    )
 
 
 @router.post("/{scan_id}/cancel", response_model=ScanOut)

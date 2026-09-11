@@ -34,6 +34,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useAgents } from "@/hooks/use-agents";
 import { useAssets } from "@/hooks/use-assets";
 import { useCreateScan, useScans } from "@/hooks/use-scans";
 import type { ScanType } from "@/lib/types";
@@ -42,8 +43,14 @@ function NewScanDialog() {
   const [open, setOpen] = useState(false);
   const [type, setType] = useState<ScanType>("external");
   const [assetIds, setAssetIds] = useState<number[]>([]);
+  const [agentId, setAgentId] = useState<string>("");
   const { data: assets, isLoading: assetsLoading } = useAssets();
+  const { data: agents, isLoading: agentsLoading } = useAgents();
   const createScan = useCreateScan();
+
+  const internalAgents = (agents ?? []).filter((a) => a.type === "internal");
+  const isInternal = type === "internal";
+  const canSubmit = isInternal ? agentId !== "" : assetIds.length > 0;
 
   function toggleAsset(id: number, checked: boolean) {
     setAssetIds((prev) => (checked ? [...prev, id] : prev.filter((a) => a !== id)));
@@ -51,13 +58,16 @@ function NewScanDialog() {
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    if (assetIds.length === 0) return;
+    if (!canSubmit) return;
     createScan.mutate(
-      { type, asset_ids: assetIds },
+      isInternal
+        ? { type, asset_ids: assetIds, agent_id: Number(agentId) }
+        : { type, asset_ids: assetIds },
       {
         onSuccess: () => {
           setOpen(false);
           setAssetIds([]);
+          setAgentId("");
         },
       },
     );
@@ -74,7 +84,9 @@ function NewScanDialog() {
           <DialogHeader>
             <DialogTitle>Start a new scan</DialogTitle>
             <DialogDescription>
-              Nuclei and OpenVAS will both run in parallel against the selected targets.
+              {isInternal
+                ? "The chosen agent discovers live hosts on its network, then runs Nuclei and OpenVAS against them."
+                : "Nuclei and OpenVAS will both run in parallel against the selected targets."}
             </DialogDescription>
           </DialogHeader>
 
@@ -92,13 +104,50 @@ function NewScanDialog() {
               </Select>
             </div>
 
+            {isInternal && (
+              <div className="grid gap-2">
+                <Label>Presence Agent</Label>
+                {agentsLoading ? (
+                  <Skeleton className="h-9 w-full" />
+                ) : internalAgents.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No internal agents registered yet — install and run the Presence Agent on a
+                    machine inside the target network first.
+                  </p>
+                ) : (
+                  <Select value={agentId} onValueChange={(v) => setAgentId(v ?? "")}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select an agent" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {internalAgents.map((agent) => (
+                        <SelectItem key={agent.id} value={String(agent.id)}>
+                          {agent.name} · {agent.status}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+            )}
+
             <div className="grid gap-2">
-              <Label>Target assets</Label>
+              <Label>
+                {isInternal ? "Pre-seed assets (optional)" : "Target assets"}
+              </Label>
+              {isInternal && (
+                <p className="text-xs text-muted-foreground">
+                  The agent discovers live hosts on its network automatically — pick assets here
+                  only if you want to scan specific known hosts in addition to what it finds.
+                </p>
+              )}
               {assetsLoading ? (
                 <Skeleton className="h-32 w-full" />
               ) : !assets || assets.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  No assets available — add an asset first.
+                  {isInternal
+                    ? "No assets to pre-seed — that's fine, the agent will discover targets itself."
+                    : "No assets available — add an asset first."}
                 </p>
               ) : (
                 <ScrollArea className="h-48 rounded-md border">
@@ -125,7 +174,7 @@ function NewScanDialog() {
           </div>
 
           <DialogFooter>
-            <Button type="submit" disabled={createScan.isPending || assetIds.length === 0}>
+            <Button type="submit" disabled={createScan.isPending || !canSubmit}>
               {createScan.isPending ? "Starting…" : "Start scan"}
             </Button>
           </DialogFooter>

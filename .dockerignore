@@ -9,3 +9,7 @@ README.md
 frontend/node_modules
 frontend/dist
 frontend/.env
+
+agent/.venv
+agent/.env
+agent/dist

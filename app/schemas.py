@@ -51,16 +51,32 @@ class AssetOut(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class CredentialCreate(BaseModel):
+    type: Literal["ssh", "winrm", "snmp"]
+    username: str
+    secret: str
+    port: int | None = None
+
+
 class ScanCreate(BaseModel):
     type: ScanType
-    asset_ids: list[int]
+    asset_ids: list[int] = []
+    agent_id: int | None = None
+    credentials: list[CredentialCreate] = []
 
-    @field_validator("asset_ids")
-    @classmethod
-    def non_empty(cls, v):
-        if not v:
-            raise ValueError("asset_ids must contain at least one asset id.")
-        return v
+    @model_validator(mode="after")
+    def validate_by_type(self):
+        if self.type == "internal":
+            if not self.agent_id:
+                raise ValueError("agent_id is required for internal scans (the on-site Presence Agent to run it).")
+        else:
+            if self.agent_id is not None:
+                raise ValueError("agent_id is only valid for internal scans.")
+            if self.credentials:
+                raise ValueError("credentials are only used by internal scans.")
+            if not self.asset_ids:
+                raise ValueError("asset_ids must contain at least one asset id.")
+        return self
 
 
 class ScanEngineOut(BaseModel):
@@ -133,7 +149,7 @@ class ScanFindingsOut(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class AgentHeartbeat(BaseModel):
+class AgentRegisterIn(BaseModel):
     name: str
     type: Literal["internal", "external"]
 
@@ -146,3 +162,62 @@ class AgentOut(BaseModel):
     type: str
     status: str
     last_seen: datetime
+
+
+class AgentRegisterOut(AgentOut):
+    # Shown exactly once, at registration time. Only its hash is ever stored.
+    api_key: str
+
+
+# ---------------------------------------------------------------------------
+# Agent job queue (internal scans)
+# ---------------------------------------------------------------------------
+
+
+class JobTargetOut(BaseModel):
+    asset_id: int
+    hostname: str | None
+    ip_address: str | None
+
+
+class JobCredentialOut(BaseModel):
+    type: str
+    username: str
+    secret: str
+    port: int | None
+
+
+class JobOut(BaseModel):
+    scan_engine_id: int
+    scan_id: int
+    engine: str
+    targets: list[JobTargetOut] = []
+    credentials: list[JobCredentialOut] = []
+
+
+class DiscoveredHost(BaseModel):
+    ip_address: str
+    hostname: str | None = None
+
+
+class JobFindingIn(BaseModel):
+    asset_id: int
+    severity: str
+    cve: str | None = None
+    description: str | None = None
+    recommendation: str | None = None
+
+
+class JobResultsIn(BaseModel):
+    hosts: list[DiscoveredHost] | None = None
+    findings: list[JobFindingIn] | None = None
+
+
+class JobProgressIn(BaseModel):
+    progress: str | None = None
+    progress_pct: int | None = None
+
+
+class JobCompleteIn(BaseModel):
+    status: Literal["completed", "failed"]
+    error_message: str | None = None

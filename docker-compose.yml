@@ -9,6 +9,7 @@ services:
       - OPENVAS_SOCKET_PATH=/run/gvmd/gvmd.sock
       - OPENVAS_USERNAME=admin
       - OPENVAS_PASSWORD=admin
+      - CREDENTIAL_ENCRYPTION_KEY=${CREDENTIAL_ENCRYPTION_KEY:?set CREDENTIAL_ENCRYPTION_KEY in .env — see .env.example}
     volumes:
       - gvmd_socket:/run/gvmd
     depends_on:

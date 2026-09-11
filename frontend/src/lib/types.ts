@@ -41,6 +41,7 @@ export interface Scan {
 export interface ScanCreate {
   type: ScanType;
   asset_ids: number[];
+  agent_id?: number;
 }
 
 export interface ScanEngineStatus {

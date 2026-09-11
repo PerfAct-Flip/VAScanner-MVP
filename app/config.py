@@ -23,5 +23,10 @@ class Settings(BaseSettings):
     openvas_poll_timeout_seconds: int = 12 * 60 * 60
     openvas_socket_wait_seconds: int = 60
 
+    # Fernet key used to encrypt scan credentials (SSH/WinRM/SNMP) at rest.
+    # Generate one with:
+    #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    credential_encryption_key: str
+
 
 settings = Settings()

@@ -123,8 +123,10 @@ export function ScanDetailPage() {
     );
   }
 
-  const nuclei = scan.engines.find((e) => e.engine === "nuclei");
-  const openvas = scan.engines.find((e) => e.engine === "openvas");
+  const engineOrder = ["discover", "nuclei", "openvas"];
+  const engines = [...scan.engines].sort(
+    (a, b) => engineOrder.indexOf(a.engine) - engineOrder.indexOf(b.engine),
+  );
   const canCancel = scan.status === "queued" || scan.status === "running";
 
   return (
@@ -171,28 +173,18 @@ export function ScanDetailPage() {
       </div>
 
       <div className="mb-6 grid gap-4 md:grid-cols-2">
-        {nuclei && (
+        {engines.map((engine) => (
           <EngineCard
-            name="Nuclei"
-            status={nuclei.status}
-            progress={nuclei.progress}
-            progressPct={nuclei.progress_pct}
-            errorMessage={nuclei.error_message}
-            startedAt={nuclei.started_at}
-            finishedAt={nuclei.finished_at}
+            key={engine.engine}
+            name={engine.engine}
+            status={engine.status}
+            progress={engine.progress}
+            progressPct={engine.progress_pct}
+            errorMessage={engine.error_message}
+            startedAt={engine.started_at}
+            finishedAt={engine.finished_at}
           />
-        )}
-        {openvas && (
-          <EngineCard
-            name="OpenVAS"
-            status={openvas.status}
-            progress={openvas.progress}
-            progressPct={openvas.progress_pct}
-            errorMessage={openvas.error_message}
-            startedAt={openvas.started_at}
-            finishedAt={openvas.finished_at}
-          />
-        )}
+        ))}
       </div>
 
       <Card>
