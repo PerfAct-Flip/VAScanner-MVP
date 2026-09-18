@@ -2,10 +2,14 @@ export type EngineName = "nuclei" | "openvas";
 export type ScanType = "internal" | "external";
 export type Severity = "Critical" | "High" | "Medium" | "Low" | "Informational";
 
+export type IdentityConfidence = "mac" | "hostname" | "ip";
+
 export interface Asset {
   id: number;
   hostname: string | null;
   ip_address: string | null;
+  mac_address: string | null;
+  identity_confidence: IdentityConfidence | null;
   environment: string | null;
   criticality: string | null;
   created_at: string;

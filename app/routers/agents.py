@@ -6,7 +6,7 @@ from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Agent, Asset, Credential, Finding, ScanEngine, ScanTarget, normalize_severity
+from app.models import Agent, Asset, Credential, Finding, ScanEngine, ScanEngineTarget, ScanTarget, normalize_severity
 from app.scanning.common import update_scan_status, utcnow
 from app.scanning.crypto import decrypt_secret
 from app.schemas import (
@@ -49,6 +49,38 @@ def _owned_job(scan_engine_id: int, agent: Agent, db: Session) -> ScanEngine:
     if se.agent_id != agent.id:
         raise HTTPException(status_code=403, detail="Job not assigned to this agent")
     return se
+
+
+# Too common across unrelated devices (unconfigured routers, IoT defaults)
+# to safely treat as a unique identity signal.
+_GENERIC_HOSTNAMES = {"localhost", "unknown", ""}
+
+
+def _match_asset(db: Session, host) -> Asset | None:
+    """Recognizes a re-discovered device across DHCP lease changes. MAC
+    address is the strongest signal (stable, but only visible for hosts on
+    the agent's own network segment); hostname is a weaker fallback for
+    hosts reached across a routed subnet where no MAC is visible; exact IP
+    match is the last resort and the only option we had before."""
+    if host.mac_address:
+        asset = db.query(Asset).filter_by(mac_address=host.mac_address).first()
+        if asset:
+            return asset
+    if host.hostname and host.hostname.lower() not in _GENERIC_HOSTNAMES:
+        asset = db.query(Asset).filter_by(hostname=host.hostname).first()
+        if asset:
+            return asset
+    return db.query(Asset).filter_by(ip_address=host.ip_address).first()
+
+
+def _identity_confidence(asset: Asset) -> str:
+    """How much to trust that this row still refers to the same physical
+    device after an IP change, given whatever identity fields are known."""
+    if asset.mac_address:
+        return "mac"
+    if asset.hostname and asset.hostname.lower() not in _GENERIC_HOSTNAMES:
+        return "hostname"
+    return "ip"
 
 
 @router.post("/register", response_model=AgentRegisterOut, status_code=201)
@@ -100,9 +132,17 @@ def _build_job_out(se: ScanEngine, db: Session) -> JobOut:
             .filter(ScanTarget.scan_id == se.scan_id)
             .all()
         )
+        # A retried ScanEngine row is reset in place (same id) rather than
+        # recreated, so targets that already succeeded on a prior attempt
+        # are excluded here — a retry only re-attempts what actually failed.
+        already_succeeded = {
+            r.asset_id
+            for r in db.query(ScanEngineTarget).filter_by(scan_engine_id=se.id, status="succeeded").all()
+        }
         targets = [
             JobTargetOut(asset_id=asset.id, hostname=asset.hostname, ip_address=asset.ip_address)
             for _, asset in rows
+            if asset.id not in already_succeeded
         ]
 
     credentials: list[JobCredentialOut] = []
@@ -172,11 +212,22 @@ def job_results(
 
     if se.engine == "discover":
         for host in payload.hosts or []:
-            asset = db.query(Asset).filter_by(ip_address=host.ip_address).first()
-            if not asset:
-                asset = Asset(ip_address=host.ip_address, hostname=host.hostname)
+            asset = _match_asset(db, host)
+            if asset:
+                # Same device recognized under a new IP (DHCP renewal) —
+                # update it in place instead of spawning a duplicate, and
+                # backfill identity fields an earlier, less-capable sighting
+                # didn't have.
+                asset.ip_address = host.ip_address
+                if host.mac_address and not asset.mac_address:
+                    asset.mac_address = host.mac_address
+                if host.hostname and not asset.hostname:
+                    asset.hostname = host.hostname
+            else:
+                asset = Asset(ip_address=host.ip_address, hostname=host.hostname, mac_address=host.mac_address)
                 db.add(asset)
                 db.flush()
+            asset.identity_confidence = _identity_confidence(asset)
             exists = db.query(ScanTarget).filter_by(scan_id=se.scan_id, asset_id=asset.id).first()
             if not exists:
                 db.add(ScanTarget(scan_id=se.scan_id, asset_id=asset.id))
@@ -196,6 +247,17 @@ def job_results(
                     recommendation=f.recommendation,
                 )
             )
+
+        for tr in payload.target_results or []:
+            if tr.asset_id not in valid_asset_ids:
+                continue
+            row = db.query(ScanEngineTarget).filter_by(scan_engine_id=se.id, asset_id=tr.asset_id).first()
+            if not row:
+                row = ScanEngineTarget(scan_engine_id=se.id, asset_id=tr.asset_id, status=tr.status)
+                db.add(row)
+            else:
+                row.status = tr.status
+            row.error_message = tr.error_message
 
     db.commit()
     return {"ok": True}

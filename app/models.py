@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -31,6 +31,16 @@ class Asset(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     hostname: Mapped[str | None] = mapped_column(String(255), nullable=True)
     ip_address: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # Populated from ARP data during discovery when the host is on the same
+    # local network segment as the presence agent (not available across
+    # routed subnets). Stable across DHCP lease renewals, so it's the
+    # preferred key for recognizing "same device, new IP" — see the
+    # discover-results matching logic in app/routers/agents.py.
+    mac_address: Mapped[str | None] = mapped_column(String(17), nullable=True)
+    # Strongest identity signal currently known for this asset: mac |
+    # hostname | ip, in descending order of how safe it is to trust across
+    # a DHCP lease change. Recomputed on every discovery sighting.
+    identity_confidence: Mapped[str | None] = mapped_column(String(20), nullable=True)
     environment: Mapped[str | None] = mapped_column(String(50), nullable=True)
     criticality: Mapped[str | None] = mapped_column(String(50), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -82,6 +92,24 @@ class ScanEngine(Base):
 
     scan: Mapped["Scan"] = relationship(back_populates="engines")
     agent: Mapped["Agent | None"] = relationship()
+
+
+class ScanEngineTarget(Base):
+    """Per-target outcome of one engine run against one asset. Lets a retry
+    re-attempt only the targets that actually failed instead of the whole
+    engine's target list — a retried `ScanEngine` row is reset in place
+    (same id, see POST /scans/{id}/retry), so these rows persist across a
+    retry and `succeeded` ones are excluded from the next job build."""
+
+    __tablename__ = "scan_engine_target"
+    __table_args__ = (UniqueConstraint("scan_engine_id", "asset_id", name="uq_scan_engine_target"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    scan_engine_id: Mapped[int] = mapped_column(ForeignKey("scan_engine.id"), nullable=False)
+    asset_id: Mapped[int] = mapped_column(ForeignKey("asset.id"), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)  # succeeded | failed
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
 class ScanTarget(Base):

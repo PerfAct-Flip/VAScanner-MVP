@@ -2,6 +2,8 @@ import json
 import shutil
 import subprocess
 
+from .retry import TransientError
+
 
 def _resolve_nuclei_binary(nuclei_binary: str) -> str:
     return shutil.which(nuclei_binary) or shutil.which(f"{nuclei_binary}.exe") or nuclei_binary
@@ -23,7 +25,10 @@ def scan_target(nuclei_binary: str, tags: str, severity: str, target: str, timeo
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired as exc:
-        raise Exception(f"Nuclei scan of {target} timed out after {timeout}s.") from exc
+        # Could be a genuinely slow/unresponsive target, or could be a
+        # one-off network blip — worth a retry rather than an immediate
+        # permanent failure.
+        raise TransientError(f"Nuclei scan of {target} timed out after {timeout}s.") from exc
 
     if result.returncode not in (0, 1):
         # nuclei exits 1 on some template errors while still emitting valid results.

@@ -59,6 +59,20 @@ class BackendClient:
         )
         r.raise_for_status()
 
+    def submit_target_result(
+        self, scan_engine_id: int, asset_id: int, status: str, error_message: str | None = None
+    ) -> None:
+        """Records whether this engine succeeded or failed against one
+        specific target, so a later retry of this job can skip targets that
+        already succeeded instead of re-attempting every target again."""
+        r = self.session.post(
+            f"{self.base_url}/api/v1/agents/jobs/{scan_engine_id}/results",
+            json={"target_results": [{"asset_id": asset_id, "status": status, "error_message": error_message}]},
+            headers=self._headers(),
+            timeout=30,
+        )
+        r.raise_for_status()
+
     def complete(self, scan_engine_id: int, status: str, error_message: str | None = None) -> None:
         r = self.session.post(
             f"{self.base_url}/api/v1/agents/jobs/{scan_engine_id}/complete",

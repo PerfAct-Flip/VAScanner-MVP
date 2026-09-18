@@ -2,6 +2,8 @@ import re
 
 import paramiko
 
+from .retry import TransientError
+
 _WEAK_CIPHERS = ("arcfour", "cbc", "3des", "blowfish", "des")
 _WEAK_MACS = ("hmac-md5", "hmac-sha1", "hmac-sha1-96", "hmac-md5-96")
 _WEAK_KEX = ("diffie-hellman-group1-sha1", "diffie-hellman-group14-sha1", "diffie-hellman-group-exchange-sha1")
@@ -43,15 +45,23 @@ def audit_host(host: str, username: str, secret: str, port: int | None, timeout:
     rather than failing the whole audit."""
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect(
-        hostname=host,
-        port=port or 22,
-        username=username,
-        password=secret,
-        timeout=timeout,
-        banner_timeout=timeout,
-        auth_timeout=timeout,
-    )
+    try:
+        client.connect(
+            hostname=host,
+            port=port or 22,
+            username=username,
+            password=secret,
+            timeout=timeout,
+            banner_timeout=timeout,
+            auth_timeout=timeout,
+        )
+    except paramiko.AuthenticationException:
+        raise  # wrong credentials — deterministic, retrying changes nothing
+    except (OSError, paramiko.SSHException) as exc:
+        # Connection refused/reset, no route, timed out negotiating — on a
+        # network with flaky links or a host mid-DHCP-renewal this can be
+        # transient rather than "this host doesn't take SSH."
+        raise TransientError(f"Could not reach {host} over SSH: {exc}") from exc
 
     findings: list[dict] = []
     try:

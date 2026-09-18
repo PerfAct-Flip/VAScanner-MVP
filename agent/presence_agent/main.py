@@ -5,6 +5,7 @@ from . import discovery, nuclei_runner, ssh_audit
 from .client import BackendClient
 from .config import Config
 from .identity import load_or_register
+from .retry import with_retry
 
 
 def handle_discover(client: BackendClient, cfg: Config, job: dict) -> None:
@@ -15,7 +16,13 @@ def handle_discover(client: BackendClient, cfg: Config, job: dict) -> None:
         return
 
     client.progress(se_id, progress=f"Scanning {', '.join(subnets)}...", progress_pct=20)
-    hosts = discovery.discover_hosts(cfg.nmap_binary, subnets, cfg.discovery_timeout_seconds)
+    hosts = discovery.discover_hosts(
+        cfg.nmap_binary,
+        subnets,
+        cfg.discovery_timeout_seconds,
+        passes=cfg.discovery_passes,
+        retry_delay_seconds=cfg.discovery_retry_delay_seconds,
+    )
     client.progress(se_id, progress=f"Found {len(hosts)} live host(s)", progress_pct=80)
     client.submit_hosts(se_id, hosts)
     client.complete(se_id, status="completed")
@@ -27,6 +34,8 @@ def handle_nuclei(client: BackendClient, cfg: Config, job: dict) -> None:
     nuclei_runner.verify_nuclei_binary(cfg.nuclei_binary)
 
     total = len(targets) or 1
+    any_success = False
+    last_error: str | None = None
     for i, t in enumerate(targets, start=1):
         target = t.get("hostname") or t.get("ip_address")
         if not target:
@@ -36,11 +45,28 @@ def handle_nuclei(client: BackendClient, cfg: Config, job: dict) -> None:
         if canceled:
             return  # backend already marked this job canceled; stop working on it
 
-        findings = nuclei_runner.scan_target(cfg.nuclei_binary, cfg.nuclei_tags, cfg.nuclei_severity, target, cfg.nuclei_timeout_seconds)
+        try:
+            findings = with_retry(
+                lambda: nuclei_runner.scan_target(
+                    cfg.nuclei_binary, cfg.nuclei_tags, cfg.nuclei_severity, target, cfg.nuclei_timeout_seconds
+                )
+            )
+        except Exception as exc:
+            # One unreachable/flaky target shouldn't sink the scan for
+            # every other target in the job.
+            last_error = f"{target}: {exc}"
+            client.submit_target_result(se_id, t["asset_id"], status="failed", error_message=str(exc)[:2000])
+            continue
+
+        any_success = True
+        client.submit_target_result(se_id, t["asset_id"], status="succeeded")
         if findings:
             client.submit_findings(se_id, [{**f, "asset_id": t["asset_id"]} for f in findings])
 
-    client.complete(se_id, status="completed")
+    if not targets or any_success:
+        client.complete(se_id, status="completed")
+    else:
+        client.complete(se_id, status="failed", error_message=f"Nuclei failed against every target. Last error: {last_error}")
 
 
 def handle_openvas(client: BackendClient, cfg: Config, job: dict) -> None:
@@ -74,6 +100,8 @@ def handle_openvas(client: BackendClient, cfg: Config, job: dict) -> None:
         host = t.get("ip_address") or t.get("hostname")
         if not host:
             continue
+        target_succeeded = False
+        target_last_error: str | None = None
         for cred in ssh_creds:
             attempt += 1
             canceled = client.progress(
@@ -83,16 +111,30 @@ def handle_openvas(client: BackendClient, cfg: Config, job: dict) -> None:
                 return
 
             try:
-                findings = ssh_audit.audit_host(
-                    host, cred["username"], cred["secret"], cred.get("port"), cfg.ssh_audit_timeout_seconds
+                findings = with_retry(
+                    lambda: ssh_audit.audit_host(
+                        host, cred["username"], cred["secret"], cred.get("port"), cfg.ssh_audit_timeout_seconds
+                    )
                 )
             except Exception as exc:
-                last_error = f"{host}: {exc}"
+                target_last_error = f"{host}: {exc}"
                 continue  # this credential just didn't work for this host — try the next one, not fatal
 
-            any_success = True
+            target_succeeded = True
             if findings:
                 client.submit_findings(se_id, [{**f, "asset_id": t["asset_id"]} for f in findings])
+            break  # this credential worked; no need to try the rest against this target
+
+        client.submit_target_result(
+            se_id,
+            t["asset_id"],
+            status="succeeded" if target_succeeded else "failed",
+            error_message=None if target_succeeded else target_last_error,
+        )
+        if target_succeeded:
+            any_success = True
+        else:
+            last_error = target_last_error
 
     if any_success:
         client.complete(se_id, status="completed")

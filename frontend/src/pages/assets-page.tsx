@@ -1,6 +1,7 @@
 import { Plus, Trash2 } from "lucide-react";
 import { type FormEvent, useState } from "react";
 
+import { IdentityBadge } from "@/components/identity-badge";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -183,6 +184,7 @@ export function AssetsPage() {
                   <TableHead>ID</TableHead>
                   <TableHead>Hostname</TableHead>
                   <TableHead>IP address</TableHead>
+                  <TableHead>Identity</TableHead>
                   <TableHead>Environment</TableHead>
                   <TableHead>Criticality</TableHead>
                   <TableHead>Added</TableHead>
@@ -195,6 +197,9 @@ export function AssetsPage() {
                     <TableCell className="text-muted-foreground">{asset.id}</TableCell>
                     <TableCell className="font-medium">{asset.hostname ?? "—"}</TableCell>
                     <TableCell>{asset.ip_address ?? "—"}</TableCell>
+                    <TableCell>
+                      <IdentityBadge confidence={asset.identity_confidence} />
+                    </TableCell>
                     <TableCell className="capitalize">{asset.environment ?? "—"}</TableCell>
                     <TableCell>{asset.criticality ?? "—"}</TableCell>
                     <TableCell className="text-muted-foreground">

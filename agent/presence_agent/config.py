@@ -14,6 +14,8 @@ class Config:
     heartbeat_interval_seconds: float
     nmap_binary: str
     discovery_timeout_seconds: int
+    discovery_passes: int
+    discovery_retry_delay_seconds: int
     nuclei_binary: str
     nuclei_tags: str
     nuclei_severity: str
@@ -37,6 +39,8 @@ class Config:
             heartbeat_interval_seconds=float(os.environ.get("HEARTBEAT_INTERVAL_SECONDS", 60)),
             nmap_binary=os.environ.get("NMAP_BINARY", "nmap"),
             discovery_timeout_seconds=int(os.environ.get("DISCOVERY_TIMEOUT_SECONDS", 120)),
+            discovery_passes=int(os.environ.get("DISCOVERY_PASSES", 2)),
+            discovery_retry_delay_seconds=int(os.environ.get("DISCOVERY_RETRY_DELAY_SECONDS", 15)),
             nuclei_binary=os.environ.get("NUCLEI_BINARY", "nuclei"),
             nuclei_tags=os.environ.get("NUCLEI_TAGS", "cve,misconfig"),
             nuclei_severity=os.environ.get("NUCLEI_SEVERITY", "critical,high,medium,low"),

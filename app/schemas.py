@@ -41,6 +41,8 @@ class AssetOut(BaseModel):
     id: int
     hostname: str | None
     ip_address: str | None
+    mac_address: str | None
+    identity_confidence: str | None
     environment: str | None
     criticality: str | None
     created_at: datetime
@@ -198,6 +200,7 @@ class JobOut(BaseModel):
 class DiscoveredHost(BaseModel):
     ip_address: str
     hostname: str | None = None
+    mac_address: str | None = None
 
 
 class JobFindingIn(BaseModel):
@@ -208,9 +211,16 @@ class JobFindingIn(BaseModel):
     recommendation: str | None = None
 
 
+class JobTargetResultIn(BaseModel):
+    asset_id: int
+    status: str  # succeeded | failed
+    error_message: str | None = None
+
+
 class JobResultsIn(BaseModel):
     hosts: list[DiscoveredHost] | None = None
     findings: list[JobFindingIn] | None = None
+    target_results: list[JobTargetResultIn] | None = None
 
 
 class JobProgressIn(BaseModel):
