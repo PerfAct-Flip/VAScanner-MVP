@@ -16,6 +16,7 @@ class Config:
     discovery_timeout_seconds: int
     discovery_passes: int
     discovery_retry_delay_seconds: int
+    discovery_top_ports: int
     nuclei_binary: str
     nuclei_tags: str
     nuclei_severity: str
@@ -41,6 +42,7 @@ class Config:
             discovery_timeout_seconds=int(os.environ.get("DISCOVERY_TIMEOUT_SECONDS", 120)),
             discovery_passes=int(os.environ.get("DISCOVERY_PASSES", 2)),
             discovery_retry_delay_seconds=int(os.environ.get("DISCOVERY_RETRY_DELAY_SECONDS", 15)),
+            discovery_top_ports=int(os.environ.get("DISCOVERY_TOP_PORTS", 50)),
             nuclei_binary=os.environ.get("NUCLEI_BINARY", "nuclei"),
             nuclei_tags=os.environ.get("NUCLEI_TAGS", "cve,misconfig"),
             nuclei_severity=os.environ.get("NUCLEI_SEVERITY", "critical,high,medium,low"),

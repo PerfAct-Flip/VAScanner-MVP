@@ -185,6 +185,7 @@ export function AssetsPage() {
                   <TableHead>Hostname</TableHead>
                   <TableHead>IP address</TableHead>
                   <TableHead>Identity</TableHead>
+                  <TableHead>Open ports</TableHead>
                   <TableHead>Environment</TableHead>
                   <TableHead>Criticality</TableHead>
                   <TableHead>Added</TableHead>
@@ -200,6 +201,7 @@ export function AssetsPage() {
                     <TableCell>
                       <IdentityBadge confidence={asset.identity_confidence} />
                     </TableCell>
+                    <TableCell className="font-mono text-xs">{asset.open_ports?.split(",").join(", ") ?? "—"}</TableCell>
                     <TableCell className="capitalize">{asset.environment ?? "—"}</TableCell>
                     <TableCell>{asset.criticality ?? "—"}</TableCell>
                     <TableCell className="text-muted-foreground">

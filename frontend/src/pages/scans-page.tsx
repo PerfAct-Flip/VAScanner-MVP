@@ -38,7 +38,7 @@ import {
 import { useAgents } from "@/hooks/use-agents";
 import { useAssets } from "@/hooks/use-assets";
 import { useCreateScan, useRetryScan, useScans } from "@/hooks/use-scans";
-import type { CredentialType, ScanType } from "@/lib/types";
+import type { CredentialType, ScanEngineChoice, ScanType } from "@/lib/types";
 
 interface CredentialRow {
   id: string;
@@ -47,6 +47,12 @@ interface CredentialRow {
   secret: string;
   port: string;
 }
+
+const ENGINE_LABELS: Record<ScanEngineChoice, string> = {
+  discover: "Discovery (ping-sweep + port check)",
+  nuclei: "Nuclei",
+  openvas: "OpenVAS / SSH Audit",
+};
 
 // crypto.randomUUID() only exists in secure contexts (HTTPS/localhost) — this
 // app is served over plain HTTP on a bare IP, where it's undefined and throws.
@@ -64,16 +70,42 @@ function NewScanDialog() {
   const [assetIds, setAssetIds] = useState<number[]>([]);
   const [agentId, setAgentId] = useState<string>("");
   const [credentials, setCredentials] = useState<CredentialRow[]>([]);
+  const [engines, setEngines] = useState<Record<ScanEngineChoice, boolean>>({
+    discover: true,
+    nuclei: true,
+    openvas: true,
+  });
   const { data: assets, isLoading: assetsLoading } = useAssets();
   const { data: agents, isLoading: agentsLoading } = useAgents();
   const createScan = useCreateScan();
 
   const internalAgents = (agents ?? []).filter((a) => a.type === "internal");
   const isInternal = type === "internal";
-  const canSubmit = isInternal ? agentId !== "" : assetIds.length > 0;
+  const engineChoices: ScanEngineChoice[] = isInternal ? ["discover", "nuclei", "openvas"] : ["nuclei", "openvas"];
+  const selectedEngines = engineChoices.filter((e) => engines[e]);
+  const validCredentials = credentials
+    .filter((c) => c.username.trim() !== "" && c.secret !== "")
+    .map((c) => ({
+      type: c.type,
+      username: c.username.trim(),
+      secret: c.secret,
+      ...(c.port.trim() !== "" ? { port: Number(c.port) } : {}),
+    }));
+
+  const needsAssetsForNoDiscover = isInternal && !engines.discover && assetIds.length === 0;
+  const needsCredentialForOpenvas = isInternal && engines.openvas && validCredentials.length === 0;
+  const canSubmit =
+    (isInternal ? agentId !== "" : assetIds.length > 0) &&
+    selectedEngines.length > 0 &&
+    !needsAssetsForNoDiscover &&
+    !needsCredentialForOpenvas;
 
   function toggleAsset(id: number, checked: boolean) {
     setAssetIds((prev) => (checked ? [...prev, id] : prev.filter((a) => a !== id)));
+  }
+
+  function toggleEngine(name: ScanEngineChoice, checked: boolean) {
+    setEngines((prev) => ({ ...prev, [name]: checked }));
   }
 
   function updateCredential(id: string, patch: Partial<CredentialRow>) {
@@ -88,25 +120,23 @@ function NewScanDialog() {
     e.preventDefault();
     if (!canSubmit) return;
 
-    const validCredentials = credentials
-      .filter((c) => c.username.trim() !== "" && c.secret !== "")
-      .map((c) => ({
-        type: c.type,
-        username: c.username.trim(),
-        secret: c.secret,
-        ...(c.port.trim() !== "" ? { port: Number(c.port) } : {}),
-      }));
-
     createScan.mutate(
       isInternal
-        ? { type, asset_ids: assetIds, agent_id: Number(agentId), credentials: validCredentials }
-        : { type, asset_ids: assetIds },
+        ? {
+            type,
+            asset_ids: assetIds,
+            agent_id: Number(agentId),
+            credentials: validCredentials,
+            engines: selectedEngines,
+          }
+        : { type, asset_ids: assetIds, engines: selectedEngines },
       {
         onSuccess: () => {
           setOpen(false);
           setAssetIds([]);
           setAgentId("");
           setCredentials([]);
+          setEngines({ discover: true, nuclei: true, openvas: true });
         },
       },
     );
@@ -124,8 +154,8 @@ function NewScanDialog() {
             <DialogTitle>Start a new scan</DialogTitle>
             <DialogDescription>
               {isInternal
-                ? "The chosen agent discovers live hosts on its network, then runs Nuclei and OpenVAS against them."
-                : "Nuclei and OpenVAS will both run in parallel against the selected targets."}
+                ? "The chosen agent runs whichever engines you select below against its network."
+                : "The selected engines run in parallel against the target assets."}
             </DialogDescription>
           </DialogHeader>
 
@@ -141,6 +171,34 @@ function NewScanDialog() {
                   <SelectItem value="internal">Internal</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Engines to run</Label>
+              <div className="flex flex-wrap gap-4">
+                {engineChoices.map((name) => (
+                  <label key={name} className="flex cursor-pointer items-center gap-2 text-sm">
+                    <Checkbox
+                      checked={engines[name]}
+                      onCheckedChange={(checked) => toggleEngine(name, checked === true)}
+                    />
+                    {ENGINE_LABELS[name]}
+                  </label>
+                ))}
+              </div>
+              {selectedEngines.length === 0 && (
+                <p className="text-xs text-destructive">Select at least one engine.</p>
+              )}
+              {needsAssetsForNoDiscover && (
+                <p className="text-xs text-destructive">
+                  Skipping Discovery requires pre-seeding at least one asset below.
+                </p>
+              )}
+              {needsCredentialForOpenvas && (
+                <p className="text-xs text-destructive">
+                  OpenVAS / SSH Audit requires at least one credential below, or uncheck it.
+                </p>
+              )}
             </div>
 
             {isInternal && (
@@ -172,12 +230,13 @@ function NewScanDialog() {
 
             <div className="grid gap-2">
               <Label>
-                {isInternal ? "Pre-seed assets (optional)" : "Target assets"}
+                {isInternal ? (engines.discover ? "Pre-seed assets (optional)" : "Target assets") : "Target assets"}
               </Label>
               {isInternal && (
                 <p className="text-xs text-muted-foreground">
-                  The agent discovers live hosts on its network automatically — pick assets here
-                  only if you want to scan specific known hosts in addition to what it finds.
+                  {engines.discover
+                    ? "The agent discovers live hosts on its network automatically — pick assets here only if you want to scan specific known hosts in addition to what it finds."
+                    : "Discovery is unchecked above, so nothing will be found automatically — pick at least one asset to scan directly."}
                 </p>
               )}
               {assetsLoading ? (
@@ -185,7 +244,9 @@ function NewScanDialog() {
               ) : !assets || assets.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
                   {isInternal
-                    ? "No assets to pre-seed — that's fine, the agent will discover targets itself."
+                    ? engines.discover
+                      ? "No assets to pre-seed — that's fine, the agent will discover targets itself."
+                      : "No assets available — add one first, or check Discovery above."
                     : "No assets available — add an asset first."}
                 </p>
               ) : (
@@ -214,7 +275,7 @@ function NewScanDialog() {
             {isInternal && (
               <div className="grid gap-2">
                 <div className="flex items-center justify-between">
-                  <Label>Credentials (optional)</Label>
+                  <Label>{engines.openvas ? "Credentials (required for OpenVAS / SSH Audit)" : "Credentials (optional)"}</Label>
                   <Button
                     type="button"
                     variant="outline"
@@ -227,7 +288,8 @@ function NewScanDialog() {
                 </div>
                 <p className="text-xs text-muted-foreground">
                   Used for authenticated checks (SSH config, pending updates) against discovered
-                  hosts. Each credential is tried against every target — leave empty to skip.
+                  hosts. Each credential is tried against every target — leave empty to skip
+                  (uncheck OpenVAS / SSH Audit above too, or the scan won't be submittable).
                 </p>
                 {credentials.map((cred) => (
                   <div key={cred.id} className="grid grid-cols-[100px_1fr_1fr_80px_auto] gap-2 rounded-md border p-2">
@@ -295,7 +357,7 @@ export function ScansPage() {
     <div>
       <PageHeader
         title="Scans"
-        description="Every scan runs Nuclei and OpenVAS as independent parallel engines."
+        description="Choose which engines to run per scan — Discovery, Nuclei, and OpenVAS/SSH Audit each run independently."
         action={<NewScanDialog />}
       />
 

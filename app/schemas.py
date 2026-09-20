@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 EngineName = Literal["nuclei", "openvas"]
 ScanType = Literal["internal", "external"]
+ScanEngineChoice = Literal["discover", "nuclei", "openvas"]
 
 
 # ---------------------------------------------------------------------------
@@ -43,6 +44,7 @@ class AssetOut(BaseModel):
     ip_address: str | None
     mac_address: str | None
     identity_confidence: str | None
+    open_ports: str | None
     environment: str | None
     criticality: str | None
     created_at: datetime
@@ -65,12 +67,27 @@ class ScanCreate(BaseModel):
     asset_ids: list[int] = []
     agent_id: int | None = None
     credentials: list[CredentialCreate] = []
+    # Which engines to run. Omit entirely (None) to get the legacy default
+    # set for this scan type — for internal scans that means "openvas" is
+    # silently skipped with no credentials, matching existing behavior;
+    # an explicit list here is a deliberate choice and fails loudly instead
+    # (see validate_by_type) if it doesn't make sense (e.g. openvas with no
+    # credential attached).
+    engines: list[ScanEngineChoice] | None = None
 
     @model_validator(mode="after")
     def validate_by_type(self):
+        if self.engines is not None and not self.engines:
+            raise ValueError("engines, if provided, must contain at least one engine.")
+
         if self.type == "internal":
             if not self.agent_id:
                 raise ValueError("agent_id is required for internal scans (the on-site Presence Agent to run it).")
+            if self.engines is not None:
+                if "openvas" in self.engines and not self.credentials:
+                    raise ValueError("openvas (SSH audit) requires at least one credential.")
+                if "discover" not in self.engines and not self.asset_ids:
+                    raise ValueError("asset_ids must be provided when 'discover' is not among the selected engines.")
         else:
             if self.agent_id is not None:
                 raise ValueError("agent_id is only valid for internal scans.")
@@ -78,6 +95,8 @@ class ScanCreate(BaseModel):
                 raise ValueError("credentials are only used by internal scans.")
             if not self.asset_ids:
                 raise ValueError("asset_ids must contain at least one asset id.")
+            if self.engines is not None and "discover" in self.engines:
+                raise ValueError("discover is only valid for internal scans.")
         return self
 
 
@@ -102,6 +121,7 @@ class ScanOut(BaseModel):
     start_time: datetime | None
     end_time: datetime | None
     created_at: datetime
+    requested_engines: str | None
     engines: list[ScanEngineOut] = []
 
 
@@ -201,6 +221,7 @@ class DiscoveredHost(BaseModel):
     ip_address: str
     hostname: str | None = None
     mac_address: str | None = None
+    open_ports: list[int] = []
 
 
 class JobFindingIn(BaseModel):

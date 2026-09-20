@@ -22,6 +22,7 @@ def handle_discover(client: BackendClient, cfg: Config, job: dict) -> None:
         cfg.discovery_timeout_seconds,
         passes=cfg.discovery_passes,
         retry_delay_seconds=cfg.discovery_retry_delay_seconds,
+        top_ports=cfg.discovery_top_ports,
     )
     client.progress(se_id, progress=f"Found {len(hosts)} live host(s)", progress_pct=80)
     client.submit_hosts(se_id, hosts)

@@ -6,7 +6,17 @@ from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Agent, Asset, Credential, Finding, ScanEngine, ScanEngineTarget, ScanTarget, normalize_severity
+from app.models import (
+    Agent,
+    Asset,
+    Credential,
+    Finding,
+    Scan,
+    ScanEngine,
+    ScanEngineTarget,
+    ScanTarget,
+    normalize_severity,
+)
 from app.scanning.common import update_scan_status, utcnow
 from app.scanning.crypto import decrypt_secret
 from app.schemas import (
@@ -228,6 +238,9 @@ def job_results(
                 db.add(asset)
                 db.flush()
             asset.identity_confidence = _identity_confidence(asset)
+            # Reflects this sighting's exposure, not cumulative history — a
+            # port that's now closed shouldn't linger as a stale finding.
+            asset.open_ports = ",".join(str(p) for p in host.open_ports) if host.open_ports else None
             exists = db.query(ScanTarget).filter_by(scan_id=se.scan_id, asset_id=asset.id).first()
             if not exists:
                 db.add(ScanTarget(scan_id=se.scan_id, asset_id=asset.id))
@@ -280,16 +293,20 @@ def job_complete(
 
     # Discovery is only step one: once it lands, queue the actual scanning
     # engines against whatever it found (plus any pre-seeded assets), pinned
-    # to the same agent that just ran discovery. "openvas" (the SSH audit)
-    # only makes sense as a credentialed check — with no credentials on the
-    # scan it would just fail immediately for every target, which isn't a
-    # scan error, it's the user's deliberate choice to run an uncredentialed
-    # scan. Skip queuing it entirely in that case instead of queuing it to
-    # fail.
+    # to the same agent that just ran discovery. Which engines follow
+    # depends on what was requested at scan creation (Scan.requested_engines)
+    # — legacy default (None) means "nuclei always, openvas only if
+    # credentials exist" so an uncredentialed scan never gets queued an
+    # SSH-audit job that's guaranteed to fail immediately.
     if se.engine == "discover" and se.status == "completed":
-        engine_names = ["nuclei"]
-        if db.query(Credential).filter_by(scan_id=se.scan_id).first():
-            engine_names.append("openvas")
+        scan = db.get(Scan, se.scan_id)
+        if scan.requested_engines is not None:
+            wanted = set(scan.requested_engines.split(","))
+            engine_names = [e for e in ("nuclei", "openvas") if e in wanted]
+        else:
+            engine_names = ["nuclei"]
+            if db.query(Credential).filter_by(scan_id=se.scan_id).first():
+                engine_names.append("openvas")
         for engine_name in engine_names:
             db.add(
                 ScanEngine(

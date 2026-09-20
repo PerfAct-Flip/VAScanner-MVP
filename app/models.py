@@ -41,6 +41,11 @@ class Asset(Base):
     # hostname | ip, in descending order of how safe it is to trust across
     # a DHCP lease change. Recomputed on every discovery sighting.
     identity_confidence: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Comma-separated open TCP ports found by discovery's port scan (see
+    # agent/presence_agent/discovery.py). Reflects the most recent discovery
+    # sighting, not a cumulative history — a port that closed since the last
+    # scan is dropped, not kept around as stale data.
+    open_ports: Mapped[str | None] = mapped_column(String(255), nullable=True)
     environment: Mapped[str | None] = mapped_column(String(50), nullable=True)
     criticality: Mapped[str | None] = mapped_column(String(50), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -55,6 +60,12 @@ class Scan(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     type: Mapped[str] = mapped_column(String(20), nullable=False)  # internal | external
     status: Mapped[str] = mapped_column(String(20), default="queued")
+    # Comma-separated engine names explicitly chosen at scan creation (e.g.
+    # "discover,nuclei"), or NULL for the legacy default set (all engines,
+    # with "openvas" silently skipped if no credentials are attached).
+    # Internal scans consult this again when discovery completes, to decide
+    # which follow-up engines to queue — see POST /agents/jobs/{id}/complete.
+    requested_engines: Mapped[str | None] = mapped_column(String(100), nullable=True)
     start_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     end_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

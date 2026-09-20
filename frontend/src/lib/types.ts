@@ -1,4 +1,5 @@
 export type EngineName = "nuclei" | "openvas";
+export type ScanEngineChoice = "discover" | "nuclei" | "openvas";
 export type ScanType = "internal" | "external";
 export type Severity = "Critical" | "High" | "Medium" | "Low" | "Informational";
 
@@ -10,6 +11,7 @@ export interface Asset {
   ip_address: string | null;
   mac_address: string | null;
   identity_confidence: IdentityConfidence | null;
+  open_ports: string | null;
   environment: string | null;
   criticality: string | null;
   created_at: string;
@@ -39,6 +41,7 @@ export interface Scan {
   start_time: string | null;
   end_time: string | null;
   created_at: string;
+  requested_engines: string | null;
   engines: ScanEngine[];
 }
 
@@ -56,6 +59,7 @@ export interface ScanCreate {
   asset_ids: number[];
   agent_id?: number;
   credentials?: CredentialCreate[];
+  engines?: ScanEngineChoice[];
 }
 
 export interface ScanEngineStatus {

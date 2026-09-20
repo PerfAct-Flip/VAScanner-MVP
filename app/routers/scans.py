@@ -24,7 +24,11 @@ def create_scan(payload: ScanCreate, background_tasks: BackgroundTasks, db: Sess
         if not agent or agent.type != "internal":
             raise HTTPException(status_code=404, detail=f"Unknown internal agent_id: {payload.agent_id}")
 
-    scan = Scan(type=payload.type, status="queued")
+    scan = Scan(
+        type=payload.type,
+        status="queued",
+        requested_engines=",".join(payload.engines) if payload.engines is not None else None,
+    )
     db.add(scan)
     db.flush()
 
@@ -32,23 +36,42 @@ def create_scan(payload: ScanCreate, background_tasks: BackgroundTasks, db: Sess
         db.add(ScanTarget(scan_id=scan.id, asset_id=asset_id))
 
     if payload.type == "external":
-        for engine_name in ENGINES:
+        selected = payload.engines if payload.engines is not None else list(ENGINES)
+        for engine_name in selected:
             db.add(ScanEngine(scan_id=scan.id, engine=engine_name, status="queued", progress="Queued", progress_pct=0))
     else:
-        # Internal scans start with a single discovery job pinned to the
-        # chosen agent; nuclei/openvas jobs only get queued once discovery
-        # reports back what's actually alive on that network (see
-        # POST /agents/jobs/{id}/complete).
-        db.add(
-            ScanEngine(
-                scan_id=scan.id,
-                engine="discover",
-                status="queued",
-                progress="Queued",
-                progress_pct=0,
-                agent_id=payload.agent_id,
+        # Default (engines=None) or "discover" explicitly selected: start
+        # with just the discovery job pinned to the chosen agent; nuclei/
+        # openvas jobs get queued once discovery reports back what's
+        # actually alive on that network (see POST /agents/jobs/{id}/complete,
+        # which re-reads Scan.requested_engines to decide what to queue).
+        # "discover" explicitly excluded: skip straight to the selected
+        # engines against whatever assets were pre-seeded (validated
+        # non-empty by ScanCreate in that case).
+        run_discover = payload.engines is None or "discover" in payload.engines
+        if run_discover:
+            db.add(
+                ScanEngine(
+                    scan_id=scan.id,
+                    engine="discover",
+                    status="queued",
+                    progress="Queued",
+                    progress_pct=0,
+                    agent_id=payload.agent_id,
+                )
             )
-        )
+        else:
+            for engine_name in payload.engines:
+                db.add(
+                    ScanEngine(
+                        scan_id=scan.id,
+                        engine=engine_name,
+                        status="queued",
+                        progress="Queued",
+                        progress_pct=0,
+                        agent_id=payload.agent_id,
+                    )
+                )
         for cred in payload.credentials:
             db.add(
                 Credential(

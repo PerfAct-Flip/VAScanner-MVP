@@ -10,16 +10,17 @@ ENGINES = ("nuclei", "openvas")
 
 
 async def execute_scan(scan_id: int, asset_ids: list[int]) -> None:
-    """External scans: creates one ScanEngine row per engine, then launches
-    Nuclei and OpenVAS as independent, non-blocking parallel jobs against the
-    same targets, in-process on the backend. Neither engine's failure or
-    delay affects the other.
+    """External scans: launches a runner for each ScanEngine row that
+    already exists (created at scan-creation time per the user's engine
+    selection — see POST /api/v1/scans) as an independent, non-blocking
+    parallel job against the same targets, in-process on the backend.
+    Neither engine's failure or delay affects the other, and an engine the
+    user didn't select simply has no row and never runs.
 
-    Internal scans run nothing here — their ScanEngine rows (starting with a
-    single 'discover' job) are created at scan-creation time already pinned
-    to a target Presence Agent, which claims and executes them itself via
-    GET /api/v1/agents/jobs/next. This function only needs to flip the scan
-    to 'running' for them."""
+    Internal scans run nothing here — their ScanEngine rows are created at
+    scan-creation time already pinned to a target Presence Agent, which
+    claims and executes them itself via GET /api/v1/agents/jobs/next. This
+    function only needs to flip the scan to 'running' for them."""
     clear_cancel(scan_id)
 
     db = SessionLocal()
@@ -30,16 +31,9 @@ async def execute_scan(scan_id: int, asset_ids: list[int]) -> None:
 
         scan.status = "running"
         scan.start_time = utcnow()
-
-        if scan.type == "external":
-            for engine_name in ENGINES:
-                existing = db.query(ScanEngine).filter_by(scan_id=scan_id, engine=engine_name).first()
-                if not existing:
-                    db.add(
-                        ScanEngine(scan_id=scan_id, engine=engine_name, status="queued", progress="Queued", progress_pct=0)
-                    )
         db.commit()
         scan_type = scan.type
+        engine_names = {e.engine for e in db.query(ScanEngine).filter_by(scan_id=scan_id).all()}
     finally:
         db.close()
 
@@ -48,11 +42,13 @@ async def execute_scan(scan_id: int, asset_ids: list[int]) -> None:
 
     # Each runner opens its own DB session and thread; a blocking call (subprocess,
     # GVM socket I/O) in one never delays the other.
-    await asyncio.gather(
-        asyncio.to_thread(run_nuclei_engine, scan_id, asset_ids),
-        asyncio.to_thread(run_openvas_engine, scan_id, asset_ids),
-        return_exceptions=True,
-    )
+    tasks = []
+    if "nuclei" in engine_names:
+        tasks.append(asyncio.to_thread(run_nuclei_engine, scan_id, asset_ids))
+    if "openvas" in engine_names:
+        tasks.append(asyncio.to_thread(run_openvas_engine, scan_id, asset_ids))
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def retry_external_engines(scan_id: int, asset_ids: list[int], engines: set[str]) -> None:

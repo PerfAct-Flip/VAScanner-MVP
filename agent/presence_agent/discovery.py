@@ -42,14 +42,14 @@ def _resolve_nmap_binary(nmap_binary: str) -> str:
     return shutil.which(nmap_binary) or nmap_binary
 
 
-def _run_nmap_sweep(exe: str, subnets: list[str], timeout: int) -> list[dict]:
-    """Runs a single `nmap -sn` ping-sweep pass and returns the hosts that
-    answered. Run as root when possible — nmap then uses ARP for local
-    subnets, which is faster and more reliable than the ICMP/TCP fallback
-    used otherwise, and is what surfaces MAC addresses at all (ARP is
-    inherently local-segment-only; a host reached through a router won't
-    have one)."""
-    cmd = [exe, "-sn", "-oX", "-", *subnets]
+def _run_nmap_sweep(exe: str, subnets: list[str], timeout: int, top_ports: int) -> list[dict]:
+    """Runs a single discovery pass — host discovery (ARP for local subnets,
+    same as a plain `-sn` sweep, which is what surfaces MAC addresses) plus
+    a lightweight TCP scan of the most common ports, in one nmap invocation.
+    Not a full port scan (that's what nuclei/the SSH audit are for) — just
+    enough to flag what's actually reachable on each host, per the meeting
+    note's "checks exposed ports" ask."""
+    cmd = [exe, "-T4", "--top-ports", str(top_ports), "-oX", "-", *subnets]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except FileNotFoundError as exc:
@@ -80,7 +80,25 @@ def _run_nmap_sweep(exe: str, subnets: list[str], timeout: int) -> list[dict]:
         mac_el = host.find("address[@addrtype='mac']")
         mac_address = mac_el.get("addr") if mac_el is not None else None
 
-        hosts.append({"ip_address": address.get("addr"), "hostname": hostname, "mac_address": mac_address})
+        open_ports = []
+        ports_el = host.find("ports")
+        if ports_el is not None:
+            for port_el in ports_el.findall("port"):
+                if port_el.get("protocol") != "tcp":
+                    continue
+                state_el = port_el.find("state")
+                portid = port_el.get("portid")
+                if state_el is not None and state_el.get("state") == "open" and portid:
+                    open_ports.append(int(portid))
+
+        hosts.append(
+            {
+                "ip_address": address.get("addr"),
+                "hostname": hostname,
+                "mac_address": mac_address,
+                "open_ports": sorted(open_ports),
+            }
+        )
     return hosts
 
 
@@ -90,13 +108,15 @@ def discover_hosts(
     timeout: int,
     passes: int = 2,
     retry_delay_seconds: int = 15,
+    top_ports: int = 50,
 ) -> list[dict]:
-    """Ping-sweeps the given CIDRs across multiple passes and returns the
-    union of hosts that answered on any of them. A single pass misses hosts
-    that were transiently unreachable — asleep, mid-reconnect, a dropped
-    ARP reply — and would otherwise mark a device "not found" that's simply
-    slow to respond, so a second (or third) pass a bit later catches those
-    without needing a whole extra manual scan."""
+    """Sweeps the given CIDRs across multiple passes and returns the union
+    of hosts that answered on any of them, each with the union of open
+    ports seen across passes. A single pass misses hosts that were
+    transiently unreachable — asleep, mid-reconnect, a dropped ARP reply —
+    and would otherwise mark a device "not found" (or a port "closed") that
+    simply didn't respond in time, so a second (or third) pass a bit later
+    catches those without needing a whole extra manual scan."""
     if not subnets:
         return []
 
@@ -106,7 +126,7 @@ def discover_hosts(
 
     for attempt in range(1, passes + 1):
         try:
-            found = _run_nmap_sweep(exe, subnets, timeout)
+            found = _run_nmap_sweep(exe, subnets, timeout, top_ports)
         except Exception as exc:
             errors.append(str(exc))
         else:
@@ -115,6 +135,7 @@ def discover_hosts(
                 if existing:
                     existing["hostname"] = existing["hostname"] or host["hostname"]
                     existing["mac_address"] = existing["mac_address"] or host["mac_address"]
+                    existing["open_ports"] = sorted(set(existing["open_ports"]) | set(host["open_ports"]))
                 else:
                     hosts_by_ip[host["ip_address"]] = host
         if attempt < passes:
