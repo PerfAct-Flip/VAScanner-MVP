@@ -280,9 +280,17 @@ def job_complete(
 
     # Discovery is only step one: once it lands, queue the actual scanning
     # engines against whatever it found (plus any pre-seeded assets), pinned
-    # to the same agent that just ran discovery.
+    # to the same agent that just ran discovery. "openvas" (the SSH audit)
+    # only makes sense as a credentialed check — with no credentials on the
+    # scan it would just fail immediately for every target, which isn't a
+    # scan error, it's the user's deliberate choice to run an uncredentialed
+    # scan. Skip queuing it entirely in that case instead of queuing it to
+    # fail.
     if se.engine == "discover" and se.status == "completed":
-        for engine_name in ("nuclei", "openvas"):
+        engine_names = ["nuclei"]
+        if db.query(Credential).filter_by(scan_id=se.scan_id).first():
+            engine_names.append("openvas")
+        for engine_name in engine_names:
             db.add(
                 ScanEngine(
                     scan_id=se.scan_id,
