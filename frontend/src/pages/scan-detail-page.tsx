@@ -1,6 +1,7 @@
 import { ArrowLeft, Download, FileText, RotateCcw, XCircle } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
 
+import { ReportsPanel } from "@/components/reports-panel";
 import { SeverityBadge } from "@/components/severity-badge";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
@@ -220,6 +221,15 @@ export function ScanDetailPage() {
               <FindingsTable findings={findings?.openvas ?? []} />
             </TabsContent>
           </Tabs>
+        </CardContent>
+      </Card>
+
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle>Reports</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ReportsPanel scanId={scan.id} />
         </CardContent>
       </Card>
     </div>

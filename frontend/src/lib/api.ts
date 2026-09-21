@@ -3,6 +3,8 @@ import type {
   Asset,
   AssetCreate,
   Finding,
+  Report,
+  ReportCreate,
   Scan,
   ScanCreate,
   ScanFindings,
@@ -91,6 +93,16 @@ export const api = {
     `${BASE_URL}/api/v1/reports/csv${scanId ? `?scan_id=${scanId}` : ""}`,
   reportPdfUrl: (scanId?: number) =>
     `${BASE_URL}/api/v1/reports/pdf${scanId ? `?scan_id=${scanId}` : ""}`,
+  listReports: (scanId?: number) =>
+    request<Report[]>(`/api/v1/reports${scanId ? `?scan_id=${scanId}` : ""}`),
+  generateReport: (payload: ReportCreate) =>
+    request<Report>("/api/v1/reports", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  deleteReport: (id: number) =>
+    request<void>(`/api/v1/reports/${id}`, { method: "DELETE" }),
+  reportDownloadUrl: (id: number) => `${BASE_URL}/api/v1/reports/${id}/download`,
 
   // Agents
   listAgents: () => request<Agent[]>("/api/v1/agents"),

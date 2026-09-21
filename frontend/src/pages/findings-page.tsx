@@ -2,6 +2,7 @@ import { Download, FileText } from "lucide-react";
 import { useState } from "react";
 
 import { PageHeader } from "@/components/page-header";
+import { ReportsPanel } from "@/components/reports-panel";
 import { SeverityBadge } from "@/components/severity-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -131,6 +132,12 @@ export function FindingsPage() {
               </TabsContent>
             </Tabs>
           )}
+        </CardContent>
+      </Card>
+
+      <Card className="mt-6">
+        <CardContent className="pt-6">
+          <ReportsPanel />
         </CardContent>
       </Card>
     </div>

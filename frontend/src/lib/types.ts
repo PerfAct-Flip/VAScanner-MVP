@@ -96,6 +96,21 @@ export interface ScanFindings {
   openvas: Finding[];
 }
 
+export type ReportFormat = "csv" | "pdf";
+
+export interface Report {
+  id: number;
+  scan_id: number | null;
+  format: ReportFormat;
+  finding_count: number;
+  generated_at: string;
+}
+
+export interface ReportCreate {
+  scan_id?: number;
+  format: ReportFormat;
+}
+
 export interface Agent {
   id: number;
   name: string;

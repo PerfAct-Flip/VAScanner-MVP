@@ -1,14 +1,17 @@
 import csv
 import io
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Asset, Finding
+from app.models import Asset, Finding, Report, Scan
+from app.schemas import ReportCreate, ReportOut
 
 router = APIRouter(prefix="/api/v1/reports", tags=["reports"])
+
+_MEDIA_TYPES = {"csv": "text/csv", "pdf": "application/pdf"}
 
 
 def _query_findings(db: Session, scan_id: int | None):
@@ -25,8 +28,7 @@ def _asset_label(db: Session, asset_id: int) -> str:
     return asset.hostname or asset.ip_address or str(asset_id)
 
 
-@router.get("/csv")
-def report_csv(scan_id: int | None = None, db: Session = Depends(get_db)):
+def _build_csv(db: Session, scan_id: int | None) -> bytes:
     findings = _query_findings(db, scan_id)
 
     buf = io.StringIO()
@@ -36,17 +38,10 @@ def report_csv(scan_id: int | None = None, db: Session = Depends(get_db)):
         writer.writerow(
             [f.id, f.engine, _asset_label(db, f.asset_id), f.severity, f.cve or "", f.description or "", f.recommendation or "", f.created_at]
         )
-
-    filename = f"report_scan_{scan_id}.csv" if scan_id else "report_findings.csv"
-    return StreamingResponse(
-        iter([buf.getvalue()]),
-        media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename={filename}"},
-    )
+    return buf.getvalue().encode("utf-8")
 
 
-@router.get("/pdf")
-def report_pdf(scan_id: int | None = None, db: Session = Depends(get_db)):
+def _build_pdf(db: Session, scan_id: int | None) -> bytes:
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import letter
     from reportlab.lib.styles import getSampleStyleSheet
@@ -93,11 +88,88 @@ def report_pdf(scan_id: int | None = None, db: Session = Depends(get_db)):
         story.append(Spacer(1, 16))
 
     doc.build(story)
-    buf.seek(0)
+    return buf.getvalue()
 
+
+def _build_report(db: Session, scan_id: int | None, fmt: str) -> bytes:
+    return _build_csv(db, scan_id) if fmt == "csv" else _build_pdf(db, scan_id)
+
+
+@router.get("/csv")
+def report_csv(scan_id: int | None = None, db: Session = Depends(get_db)):
+    content = _build_csv(db, scan_id)
+    filename = f"report_scan_{scan_id}.csv" if scan_id else "report_findings.csv"
+    return StreamingResponse(
+        iter([content]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@router.get("/pdf")
+def report_pdf(scan_id: int | None = None, db: Session = Depends(get_db)):
+    content = _build_pdf(db, scan_id)
     filename = f"report_scan_{scan_id}.pdf" if scan_id else "report_findings.pdf"
     return StreamingResponse(
-        buf,
+        iter([content]),
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
+
+
+# ---------------------------------------------------------------------------
+# Generated (persisted) reports — a snapshot saved at generation time, kept
+# around for later download, distinct from the always-live /csv and /pdf
+# endpoints above.
+# ---------------------------------------------------------------------------
+
+
+@router.post("", response_model=ReportOut, status_code=201)
+def generate_report(payload: ReportCreate, db: Session = Depends(get_db)):
+    if payload.scan_id is not None and not db.get(Scan, payload.scan_id):
+        raise HTTPException(status_code=404, detail=f"Unknown scan_id: {payload.scan_id}")
+
+    findings = _query_findings(db, payload.scan_id)
+    content = _build_report(db, payload.scan_id, payload.format)
+
+    report = Report(
+        scan_id=payload.scan_id,
+        format=payload.format,
+        content=content,
+        finding_count=len(findings),
+    )
+    db.add(report)
+    db.commit()
+    db.refresh(report)
+    return report
+
+
+@router.get("", response_model=list[ReportOut])
+def list_reports(scan_id: int | None = None, db: Session = Depends(get_db)):
+    query = db.query(Report).order_by(Report.generated_at.desc())
+    if scan_id is not None:
+        query = query.filter(Report.scan_id == scan_id)
+    return query.all()
+
+
+@router.get("/{report_id}/download")
+def download_report(report_id: int, db: Session = Depends(get_db)):
+    report = db.get(Report, report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    filename = f"report_{report.id}_scan_{report.scan_id}.{report.format}" if report.scan_id else f"report_{report.id}.{report.format}"
+    return StreamingResponse(
+        iter([report.content]),
+        media_type=_MEDIA_TYPES[report.format],
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@router.delete("/{report_id}", status_code=204)
+def delete_report(report_id: int, db: Session = Depends(get_db)):
+    report = db.get(Report, report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    db.delete(report)
+    db.commit()

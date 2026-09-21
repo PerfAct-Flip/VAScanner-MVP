@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -185,3 +185,20 @@ class Credential(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     scan: Mapped["Scan"] = relationship(back_populates="credentials")
+
+
+class Report(Base):
+    """A generated report is a point-in-time snapshot, not a live view —
+    the rendered bytes are stored as-is so a report downloaded later still
+    matches what was generated, even if findings for the scan change
+    afterward (a retry, a new finding, etc). NULL scan_id means "all scans"
+    (the same scope the ad-hoc /reports/csv|pdf endpoints support)."""
+
+    __tablename__ = "report"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    scan_id: Mapped[int | None] = mapped_column(ForeignKey("scan.id"), nullable=True)
+    format: Mapped[str] = mapped_column(String(10), nullable=False)  # csv | pdf
+    content: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    finding_count: Mapped[int] = mapped_column(Integer, default=0)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

@@ -167,6 +167,26 @@ class ScanFindingsOut(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Reports
+# ---------------------------------------------------------------------------
+
+
+class ReportCreate(BaseModel):
+    scan_id: int | None = None
+    format: Literal["csv", "pdf"]
+
+
+class ReportOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    scan_id: int | None
+    format: str
+    finding_count: int
+    generated_at: datetime
+
+
+# ---------------------------------------------------------------------------
 # Agents
 # ---------------------------------------------------------------------------
 
