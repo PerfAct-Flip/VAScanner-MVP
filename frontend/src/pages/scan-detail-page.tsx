@@ -229,7 +229,7 @@ export function ScanDetailPage() {
           <CardTitle>Reports</CardTitle>
         </CardHeader>
         <CardContent>
-          <ReportsPanel scanId={scan.id} />
+          <ReportsPanel scanId={scan.id} scanType={scan.type} />
         </CardContent>
       </Card>
     </div>

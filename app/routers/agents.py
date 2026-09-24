@@ -258,6 +258,8 @@ def job_results(
                     cve=f.cve,
                     description=f.description,
                     recommendation=f.recommendation,
+                    cvss_score=f.cvss_score,
+                    port=f.port,
                 )
             )
 

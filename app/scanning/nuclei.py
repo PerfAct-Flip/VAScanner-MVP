@@ -1,6 +1,7 @@
 import json
 import shutil
 import subprocess
+from urllib.parse import urlparse
 
 from app.config import settings
 from app.database import SessionLocal
@@ -9,6 +10,30 @@ from app.scanning.common import is_cancelled, update_scan_status, utcnow, valida
 
 
 _BINARY_VERIFIED = False
+
+
+def _extract_port(data: dict) -> int | None:
+    """See agent/presence_agent/nuclei_runner.py's copy of this — same
+    reasoning, kept separate since this runs in a different process/package
+    with no shared dependency between the two."""
+    port = data.get("port")
+    if port:
+        try:
+            return int(port)
+        except (TypeError, ValueError):
+            pass
+
+    matched = data.get("matched-at") or data.get("host") or ""
+    if not matched:
+        return None
+    parsed = urlparse(matched if "://" in matched else f"//{matched}")
+    if parsed.port:
+        return parsed.port
+    if parsed.scheme == "https":
+        return 443
+    if parsed.scheme == "http":
+        return 80
+    return None
 
 
 def _resolve_nuclei_binary() -> str:
@@ -115,14 +140,17 @@ def _run_nuclei_scan(scan_id: int, asset_id: int, target: str, se: ScanEngine, d
             continue
 
         info = data.get("info", {})
+        classification = info.get("classification") or {}
         finding = Finding(
             scan_id=scan_id,
             asset_id=asset_id,
             engine="nuclei",
             severity=normalize_severity(info.get("severity")),
-            cve=(info.get("classification") or {}).get("cve-id", ""),
+            cve=classification.get("cve-id", ""),
             description=info.get("description") or info.get("name") or "Nuclei finding",
             recommendation=info.get("remediation", ""),
+            cvss_score=classification.get("cvss-score"),
+            port=_extract_port(data),
         )
         db.add(finding)
         count += 1

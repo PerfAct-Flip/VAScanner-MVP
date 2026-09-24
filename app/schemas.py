@@ -157,6 +157,8 @@ class FindingOut(BaseModel):
     cve: str | None
     description: str | None
     recommendation: str | None
+    cvss_score: float | None
+    port: int | None
     created_at: datetime
 
 
@@ -171,9 +173,44 @@ class ScanFindingsOut(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class PciCompanyInfo(BaseModel):
+    company: str
+    contact_name: str
+    job_title: str
+    telephone: str
+    email: str
+    address: str
+    city: str | None = None
+    state: str | None = None
+    postal_code: str | None = None
+    country: str | None = None
+    url: str | None = None
+
+
+class PciReportInfo(BaseModel):
+    customer: PciCompanyInfo
+    asv: PciCompanyInfo
+    asv_certificate_number: str
+    scan_report_type: Literal["Full scan", "Partial scan"] = "Full scan"
+
+
 class ReportCreate(BaseModel):
     scan_id: int | None = None
-    format: Literal["csv", "pdf"]
+    format: Literal["csv", "pdf", "pci"]
+    # Required (and only meaningful) when format == "pci" — this app has no
+    # customer/tenant model, so the scan-customer and ASV company details
+    # that populate the attestation sections are supplied per-report rather
+    # than stored anywhere.
+    pci_info: PciReportInfo | None = None
+
+    @model_validator(mode="after")
+    def validate_pci(self):
+        if self.format == "pci":
+            if self.pci_info is None:
+                raise ValueError("pci_info is required when format is 'pci'.")
+            if self.scan_id is None:
+                raise ValueError("scan_id is required when format is 'pci' — a PCI ASV report is scoped to one scan.")
+        return self
 
 
 class ReportOut(BaseModel):
@@ -250,6 +287,8 @@ class JobFindingIn(BaseModel):
     cve: str | None = None
     description: str | None = None
     recommendation: str | None = None
+    cvss_score: float | None = None
+    port: int | None = None
 
 
 class JobTargetResultIn(BaseModel):

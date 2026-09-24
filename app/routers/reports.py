@@ -7,11 +7,12 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Asset, Finding, Report, Scan
+from app.scanning.pci_report import build_pci_report
 from app.schemas import ReportCreate, ReportOut
 
 router = APIRouter(prefix="/api/v1/reports", tags=["reports"])
 
-_MEDIA_TYPES = {"csv": "text/csv", "pdf": "application/pdf"}
+_MEDIA_TYPES = {"csv": "text/csv", "pdf": "application/pdf", "pci": "application/pdf"}
 
 
 def _query_findings(db: Session, scan_id: int | None):
@@ -91,8 +92,12 @@ def _build_pdf(db: Session, scan_id: int | None) -> bytes:
     return buf.getvalue()
 
 
-def _build_report(db: Session, scan_id: int | None, fmt: str) -> bytes:
-    return _build_csv(db, scan_id) if fmt == "csv" else _build_pdf(db, scan_id)
+def _build_report(db: Session, scan_id: int | None, fmt: str, pci_info=None) -> bytes:
+    if fmt == "csv":
+        return _build_csv(db, scan_id)
+    if fmt == "pci":
+        return build_pci_report(db, scan_id, pci_info)
+    return _build_pdf(db, scan_id)
 
 
 @router.get("/csv")
@@ -130,7 +135,7 @@ def generate_report(payload: ReportCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=f"Unknown scan_id: {payload.scan_id}")
 
     findings = _query_findings(db, payload.scan_id)
-    content = _build_report(db, payload.scan_id, payload.format)
+    content = _build_report(db, payload.scan_id, payload.format, pci_info=payload.pci_info)
 
     report = Report(
         scan_id=payload.scan_id,
@@ -158,7 +163,13 @@ def download_report(report_id: int, db: Session = Depends(get_db)):
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
 
-    filename = f"report_{report.id}_scan_{report.scan_id}.{report.format}" if report.scan_id else f"report_{report.id}.{report.format}"
+    ext = "pdf" if report.format == "pci" else report.format
+    name_prefix = "pci_asv_report" if report.format == "pci" else "report"
+    filename = (
+        f"{name_prefix}_{report.id}_scan_{report.scan_id}.{ext}"
+        if report.scan_id
+        else f"{name_prefix}_{report.id}.{ext}"
+    )
     return StreamingResponse(
         iter([report.content]),
         media_type=_MEDIA_TYPES[report.format],

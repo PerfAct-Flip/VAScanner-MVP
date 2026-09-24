@@ -123,7 +123,9 @@ def handle_openvas(client: BackendClient, cfg: Config, job: dict) -> None:
 
             target_succeeded = True
             if findings:
-                client.submit_findings(se_id, [{**f, "asset_id": t["asset_id"]} for f in findings])
+                client.submit_findings(
+                    se_id, [{**f, "asset_id": t["asset_id"], "port": cred.get("port") or 22} for f in findings]
+                )
             break  # this credential worked; no need to try the rest against this target
 
         client.submit_target_result(

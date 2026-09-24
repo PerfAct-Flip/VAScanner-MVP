@@ -145,6 +145,14 @@ class Finding(Base):
     cve: Mapped[str | None] = mapped_column(String(100), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     recommendation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Real CVSS base score when the engine reports one (nuclei templates,
+    # OpenVAS/GVM's nvt.cvss_base) — NULL for checks with no CVE-style score
+    # of their own (the SSH audit's config/posture checks). A PCI-style
+    # report falls back to a severity-band estimate in that case; see
+    # app.scanning.pci.effective_cvss — never treat this column alone as
+    # "the" PCI score without going through that fallback.
+    cvss_score: Mapped[float | None] = mapped_column(nullable=True)
+    port: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     scan: Mapped["Scan"] = relationship(back_populates="findings")

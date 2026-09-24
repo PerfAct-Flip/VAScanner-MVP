@@ -1,11 +1,13 @@
 import { Download, FileText, Trash2 } from "lucide-react";
 
+import { PciReportDialog } from "@/components/pci-report-dialog";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDeleteReport, useGenerateReport, useReports } from "@/hooks/use-reports";
 import { api } from "@/lib/api";
+import type { ScanType } from "@/lib/types";
 
-export function ReportsPanel({ scanId }: { scanId?: number }) {
+export function ReportsPanel({ scanId, scanType }: { scanId?: number; scanType?: ScanType }) {
   const { data: reports, isLoading } = useReports(scanId);
   const generateReport = useGenerateReport();
   const deleteReport = useDeleteReport(scanId);
@@ -33,6 +35,9 @@ export function ReportsPanel({ scanId }: { scanId?: number }) {
             <FileText className="size-4" />
             Generate PDF
           </Button>
+          {/* PCI ASV certification only covers external scans (PCI DSS 11.3.2) —
+              an internal scan has no ASV attestation to make. */}
+          {scanId !== undefined && scanType === "external" && <PciReportDialog scanId={scanId} />}
         </div>
       </div>
 

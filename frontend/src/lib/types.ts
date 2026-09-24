@@ -96,7 +96,7 @@ export interface ScanFindings {
   openvas: Finding[];
 }
 
-export type ReportFormat = "csv" | "pdf";
+export type ReportFormat = "csv" | "pdf" | "pci";
 
 export interface Report {
   id: number;
@@ -106,9 +106,31 @@ export interface Report {
   generated_at: string;
 }
 
+export interface PciCompanyInfo {
+  company: string;
+  contact_name: string;
+  job_title: string;
+  telephone: string;
+  email: string;
+  address: string;
+  city?: string;
+  state?: string;
+  postal_code?: string;
+  country?: string;
+  url?: string;
+}
+
+export interface PciReportInfo {
+  customer: PciCompanyInfo;
+  asv: PciCompanyInfo;
+  asv_certificate_number: string;
+  scan_report_type?: "Full scan" | "Partial scan";
+}
+
 export interface ReportCreate {
   scan_id?: number;
   format: ReportFormat;
+  pci_info?: PciReportInfo;
 }
 
 export interface Agent {

@@ -1,8 +1,35 @@
 import json
 import shutil
 import subprocess
+from urllib.parse import urlparse
 
 from .retry import TransientError
+
+
+def _extract_port(data: dict) -> int | None:
+    """Nuclei's JSON output doesn't have one consistent field for this —
+    check the explicit 'port' field first (some protocol templates set it),
+    then fall back to parsing whatever host:port nuclei actually matched
+    against, which is more accurate than assuming the target's default
+    port when a template probes something else."""
+    port = data.get("port")
+    if port:
+        try:
+            return int(port)
+        except (TypeError, ValueError):
+            pass
+
+    matched = data.get("matched-at") or data.get("host") or ""
+    if not matched:
+        return None
+    parsed = urlparse(matched if "://" in matched else f"//{matched}")
+    if parsed.port:
+        return parsed.port
+    if parsed.scheme == "https":
+        return 443
+    if parsed.scheme == "http":
+        return 80
+    return None
 
 
 def _resolve_nuclei_binary(nuclei_binary: str) -> str:
@@ -45,12 +72,15 @@ def scan_target(nuclei_binary: str, tags: str, severity: str, target: str, timeo
             continue
 
         info = data.get("info", {})
+        classification = info.get("classification") or {}
         findings.append(
             {
                 "severity": info.get("severity"),
-                "cve": (info.get("classification") or {}).get("cve-id") or None,
+                "cve": classification.get("cve-id") or None,
                 "description": info.get("description") or info.get("name") or "Nuclei finding",
                 "recommendation": info.get("remediation") or None,
+                "cvss_score": classification.get("cvss-score"),
+                "port": _extract_port(data),
             }
         )
     return findings

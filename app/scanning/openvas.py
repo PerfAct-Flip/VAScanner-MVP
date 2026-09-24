@@ -88,11 +88,26 @@ def _save_openvas_results(results, scan_id: int, asset_id: int, db) -> int:
         desc = desc_node.text if desc_node is not None else ""
 
         cve = ""
+        cvss_score = None
         nvt = result.find("nvt")
         if nvt is not None:
             cve_node = nvt.find("cve")
             if cve_node is not None and cve_node.text and cve_node.text != "NOCVE":
                 cve = cve_node.text
+            cvss_node = nvt.find("cvss_base")
+            if cvss_node is not None and cvss_node.text:
+                try:
+                    cvss_score = float(cvss_node.text)
+                except ValueError:
+                    pass
+
+        port = None
+        port_node = result.find("port")
+        if port_node is not None and port_node.text:
+            # GVM formats this like "443/tcp" or "general/tcp" (no port).
+            head = port_node.text.split("/", 1)[0]
+            if head.isdigit():
+                port = int(head)
 
         finding = Finding(
             scan_id=scan_id,
@@ -102,6 +117,8 @@ def _save_openvas_results(results, scan_id: int, asset_id: int, db) -> int:
             cve=cve,
             description=(desc or "").strip(),
             recommendation="",
+            cvss_score=cvss_score,
+            port=port,
         )
         db.add(finding)
         count += 1
