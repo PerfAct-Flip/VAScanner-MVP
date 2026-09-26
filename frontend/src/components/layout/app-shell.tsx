@@ -1,4 +1,5 @@
 import {
+  FileText,
   LayoutDashboard,
   ListChecks,
   Radar,
@@ -15,6 +16,7 @@ const NAV_ITEMS = [
   { to: "/assets", label: "Assets", icon: Server },
   { to: "/scans", label: "Scans", icon: ScanLine },
   { to: "/findings", label: "Findings", icon: ListChecks },
+  { to: "/reports", label: "Reports", icon: FileText },
   { to: "/agents", label: "Agents", icon: Radar },
 ];
 
@@ -47,7 +49,7 @@ export function AppShell() {
           ))}
         </nav>
         <div className="border-t p-4 text-xs text-muted-foreground">
-          Nuclei + OpenVAS run in parallel on every scan.
+          Choose which engines run per scan — Discovery, Nuclei, and OpenVAS/SSH Audit.
         </div>
       </aside>
 

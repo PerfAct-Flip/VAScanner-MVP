@@ -1,10 +1,7 @@
-import { Download, FileText } from "lucide-react";
 import { useState } from "react";
 
 import { PageHeader } from "@/components/page-header";
-import { ReportsPanel } from "@/components/reports-panel";
 import { SeverityBadge } from "@/components/severity-badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Select,
@@ -24,7 +21,6 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useFindings } from "@/hooks/use-findings";
-import { api } from "@/lib/api";
 import type { Finding } from "@/lib/types";
 
 const SEVERITIES = ["Critical", "High", "Medium", "Low", "Informational"];
@@ -77,18 +73,6 @@ export function FindingsPage() {
       <PageHeader
         title="Findings"
         description="Nuclei and OpenVAS findings, always kept in structurally separate sections."
-        action={
-          <div className="flex gap-2">
-            <Button variant="outline" render={<a href={api.reportCsvUrl()} />}>
-              <Download className="size-4" />
-              Export CSV
-            </Button>
-            <Button variant="outline" render={<a href={api.reportPdfUrl()} />}>
-              <FileText className="size-4" />
-              Export PDF
-            </Button>
-          </div>
-        }
       />
 
       <div className="mb-4">
@@ -132,12 +116,6 @@ export function FindingsPage() {
               </TabsContent>
             </Tabs>
           )}
-        </CardContent>
-      </Card>
-
-      <Card className="mt-6">
-        <CardContent className="pt-6">
-          <ReportsPanel />
         </CardContent>
       </Card>
     </div>
