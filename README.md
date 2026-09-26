@@ -1,10 +1,75 @@
 # Scanner Backend
 
 FastAPI backend for vendors to scan internal and external assets for vulnerabilities.
-Every scan runs **Nuclei and OpenVAS in parallel**, tracked as independent per-engine
-records — one engine failing or being slow never blocks or invalidates the other.
+A scan runs whichever engines are selected (Discovery, Nuclei, OpenVAS/SSH-Audit) as
+independent per-engine records, each isolated per-target — one bad target or a slow
+engine never blocks or invalidates the others.
 
-No UI: everything is a JSON API meant to be exercised with curl/Postman.
+This repo also has a React frontend (`frontend/`) and a separate on-site "Presence
+Agent" (`agent/`) for scanning a customer's internal network; both have their own
+READMEs. The backend's JSON API can also be exercised directly with curl/Postman.
+
+## Architecture
+
+```mermaid
+graph LR
+    UI["React frontend"] -->|REST| API
+
+    subgraph Backend
+        API["FastAPI backend"]
+        DB[("Postgres / SQLite")]
+        Nuclei["Nuclei\n(in-process)"]
+        GVM["OpenVAS / GVM\n(unauthenticated)"]
+    end
+
+    API --> DB
+    API --> Nuclei
+    API --> GVM
+    Nuclei -->|external scans| ExtTargets[("Internet-facing\ntargets")]
+    GVM -->|external scans| ExtTargets
+
+    subgraph "Customer's internal network"
+        Agent["Presence Agent"]
+        Hosts[("Internal hosts")]
+        Agent -->|nmap discovery,\nNuclei, SSH audit| Hosts
+    end
+
+    Agent <-->|poll for jobs,\nreport results| API
+```
+
+The presence agent never accepts inbound connections — it's the one thing that
+initiates contact, long-polling the backend for work over plain outbound REST. This is
+also why credentialed checks (the SSH audit) only apply to internal scans; external
+scans through Nuclei/OpenVAS are always unauthenticated, since that's what an ASV scan
+is supposed to represent (see PCI DSS 11.3.2 vs 11.3.1).
+
+### Scan lifecycle
+
+```mermaid
+flowchart TD
+    A["POST /scans"] --> B{"type?"}
+
+    B -->|external| C["Queue selected engines\n(nuclei / openvas)"]
+    C --> D["Run in-process,\nisolated per target"]
+
+    B -->|internal| E{"'discover' selected?"}
+    E -->|yes, or default| F["Queue discover job,\npinned to agent"]
+    F --> G["Agent: nmap sweep\n+ top-ports scan"]
+    G --> H["Hosts reported back —\nmatched by MAC / hostname / IP"]
+    H --> I{"credential\nattached?"}
+    I -->|yes| J["Queue nuclei + openvas"]
+    I -->|no| K["Queue nuclei only —\nwarns, doesn't fail"]
+    E -->|no| L["Queue selected engines\nagainst pre-seeded assets"]
+
+    D --> M["Findings recorded\n(severity, cvss_score, port)"]
+    J --> M
+    K --> M
+    L --> M
+    M --> N["Generate a report:\nCSV / PDF / PCI ASV"]
+```
+
+A retry only re-attempts targets that didn't already succeed (tracked per
+engine-per-target), whether the scan is internal or external.
 
 ## Setup
 
@@ -75,7 +140,7 @@ curl.exe -s -X POST http://localhost:8088/api/v1/assets -H "Content-Type: applic
 # List assets
 curl.exe -s http://localhost:8088/api/v1/assets
 
-# Start a scan (asset_ids from the response above) — Nuclei + OpenVAS launch in parallel
+# Start a scan (asset_ids from the response above) — runs the default engine set
 curl.exe -s -X POST http://localhost:8088/api/v1/scans -H "Content-Type: application/json" -d '{"type": "external", "asset_ids": [1]}'
 
 # Poll per-engine status
@@ -112,14 +177,19 @@ Invoke-RestMethod -Method Post -Uri http://localhost:8088/api/v1/scans -ContentT
 | GET    | `/api/v1/assets`                 | List assets                                    |
 | GET    | `/api/v1/assets/{id}`            | Get one asset                                  |
 | DELETE | `/api/v1/assets/{id}`            | Delete an asset                                |
-| POST   | `/api/v1/scans`                  | Create a scan; dispatches Nuclei + OpenVAS      |
+| POST   | `/api/v1/scans`                  | Create a scan; optional `engines` list picks which to run |
 | GET    | `/api/v1/scans`                  | List scans (with per-engine sub-records)       |
 | GET    | `/api/v1/scans/{id}`             | Get one scan                                   |
 | GET    | `/api/v1/scans/{id}/status`      | Live per-engine status/progress                |
 | GET    | `/api/v1/scans/{id}/findings`    | Findings, separated by engine                  |
 | POST   | `/api/v1/scans/{id}/cancel`      | Cooperatively cancel a running scan            |
+| POST   | `/api/v1/scans/{id}/retry`       | Retry failed engines/targets only              |
 | GET    | `/api/v1/findings`               | All findings (filter: scan_id, asset_id, engine, severity) |
-| GET    | `/api/v1/reports/csv`            | CSV report (optional `scan_id`)                |
-| GET    | `/api/v1/reports/pdf`            | PDF report, sectioned by engine (optional `scan_id`) |
+| GET    | `/api/v1/reports/csv`            | Always-live CSV report (optional `scan_id`)    |
+| GET    | `/api/v1/reports/pdf`            | Always-live PDF report (optional `scan_id`)    |
+| POST   | `/api/v1/reports`                | Generate and persist a report snapshot (`format`: csv/pdf/pci) |
+| GET    | `/api/v1/reports`                | List persisted reports (optional `scan_id`)    |
+| GET    | `/api/v1/reports/{id}/download`  | Download a persisted report                    |
+| DELETE | `/api/v1/reports/{id}`           | Delete a persisted report                      |
 | POST   | `/api/v1/agents/heartbeat`       | Register/refresh agent presence                |
 | GET    | `/api/v1/agents`                 | List agents                                    |
