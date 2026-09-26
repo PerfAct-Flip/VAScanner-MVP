@@ -28,10 +28,26 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _strip_port(target: str) -> str:
+    """Targets are sometimes given as 'host:port' (e.g. a non-standard HTTP
+    port on an internal test box) — that whole string is neither a literal
+    IP nor a resolvable hostname, only the host part is. Bracketed IPv6
+    ('[::1]:8081') and bare IPv6 (no unambiguous port suffix possible) are
+    left alone."""
+    if target.startswith("["):
+        return target[1:].split("]", 1)[0]
+    if target.count(":") == 1:
+        host, _, port = target.rpartition(":")
+        if port.isdigit():
+            return host
+    return target
+
+
 def dns_resolves(target: str) -> bool:
     """True if target is a literal IP, or a hostname that currently
     resolves. Never raises — used for advance warnings, not to gate
     whether a scan is allowed to run."""
+    target = _strip_port(target)
     try:
         ipaddress.ip_address(target)
         return True

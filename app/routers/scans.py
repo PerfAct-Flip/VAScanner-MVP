@@ -43,15 +43,29 @@ def create_scan(payload: ScanCreate, background_tasks: BackgroundTasks, db: Sess
     # no credential attached (that engine just isn't queued at all in that
     # case — see the "internal" branch below, and job_complete for the
     # equivalent default-engines case once discovery finishes).
+    resolves_by_asset_id: dict[int, bool] = {}
     for a in assets:
         target = a.hostname or a.ip_address
-        if target and not dns_resolves(target):
+        resolves_by_asset_id[a.id] = bool(target) and dns_resolves(target)
+        if target and not resolves_by_asset_id[a.id]:
             warnings.append(f"'{target}' does not currently resolve via DNS — scans against it may fail.")
 
     if payload.type == "external":
         selected = payload.engines if payload.engines is not None else list(ENGINES)
-        for engine_name in selected:
-            db.add(ScanEngine(scan_id=scan.id, engine=engine_name, status="queued", progress="Queued", progress_pct=0))
+        # nuclei and OpenVAS/GVM both re-check DNS per-target at run time
+        # anyway (and skip just that one target if it fails — see
+        # app/scanning/nuclei.py / openvas.py), so a *mixed* batch still
+        # gets queued and runs against whatever does resolve. Only skip
+        # queuing altogether when nothing in the batch has any chance of
+        # succeeding — no point starting an engine (and, for OpenVAS,
+        # spinning up a whole GVM task) known in advance to do nothing.
+        if assets and not any(resolves_by_asset_id.values()):
+            warnings.append("No selected target currently resolves via DNS — no engines were queued for this scan.")
+        else:
+            for engine_name in selected:
+                db.add(
+                    ScanEngine(scan_id=scan.id, engine=engine_name, status="queued", progress="Queued", progress_pct=0)
+                )
     else:
         # Default (engines=None) or "discover" explicitly selected: start
         # with just the discovery job pinned to the chosen agent; nuclei/
