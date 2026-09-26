@@ -6,6 +6,7 @@ import { AgentsPage } from "@/pages/agents-page";
 import { AssetsPage } from "@/pages/assets-page";
 import { DashboardPage } from "@/pages/dashboard-page";
 import { FindingsPage } from "@/pages/findings-page";
+import { InsightsPage } from "@/pages/insights-page";
 import { ReportsPage } from "@/pages/reports-page";
 import { ScanDetailPage } from "@/pages/scan-detail-page";
 import { ScansPage } from "@/pages/scans-page";
@@ -20,6 +21,7 @@ function App() {
           <Route path="scans" element={<ScansPage />} />
           <Route path="scans/:id" element={<ScanDetailPage />} />
           <Route path="findings" element={<FindingsPage />} />
+          <Route path="insights" element={<InsightsPage />} />
           <Route path="reports" element={<ReportsPage />} />
           <Route path="agents" element={<AgentsPage />} />
         </Route>

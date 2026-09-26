@@ -1,6 +1,7 @@
 import {
   FileText,
   LayoutDashboard,
+  LineChart,
   ListChecks,
   Radar,
   ScanLine,
@@ -16,6 +17,7 @@ const NAV_ITEMS = [
   { to: "/assets", label: "Assets", icon: Server },
   { to: "/scans", label: "Scans", icon: ScanLine },
   { to: "/findings", label: "Findings", icon: ListChecks },
+  { to: "/insights", label: "Insights", icon: LineChart },
   { to: "/reports", label: "Reports", icon: FileText },
   { to: "/agents", label: "Agents", icon: Radar },
 ];

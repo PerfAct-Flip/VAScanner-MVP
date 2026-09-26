@@ -1,18 +1,28 @@
-import { Download, FileText, Radar, ScanLine, Server, ShieldAlert } from "lucide-react";
+import { Radar, ScanLine, Server, ShieldAlert } from "lucide-react";
 import { Link } from "react-router-dom";
+import {
+  Bar,
+  BarChart,
+  Cell,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 
+import { ChartTooltip } from "@/components/chart-tooltip";
 import { PageHeader } from "@/components/page-header";
-import { SeverityBadge } from "@/components/severity-badge";
 import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAgents } from "@/hooks/use-agents";
 import { useAssets } from "@/hooks/use-assets";
 import { useFindings } from "@/hooks/use-findings";
 import { useScans } from "@/hooks/use-scans";
-import { api } from "@/lib/api";
+import { SEVERITY_COLORS, SEVERITY_ORDER, scanStatusColor } from "@/lib/chart-colors";
 import { cn } from "@/lib/utils";
 
 function StatCard({
@@ -45,6 +55,64 @@ function StatCard({
   );
 }
 
+function SeverityBarChart({ findings }: { findings: { severity: string }[] }) {
+  const data = SEVERITY_ORDER.map((severity) => ({
+    severity,
+    count: findings.filter((f) => f.severity === severity).length,
+  })).filter((d) => d.count > 0);
+
+  if (data.length === 0) {
+    return <p className="text-sm text-muted-foreground">No findings yet.</p>;
+  }
+
+  return (
+    <ResponsiveContainer width="100%" height={220}>
+      <BarChart data={data} layout="vertical" margin={{ left: 8, right: 24 }}>
+        <XAxis type="number" allowDecimals={false} tick={{ fontSize: 12 }} stroke="var(--muted-foreground)" />
+        <YAxis
+          type="category"
+          dataKey="severity"
+          width={90}
+          tick={{ fontSize: 12 }}
+          stroke="var(--muted-foreground)"
+          tickLine={false}
+          axisLine={false}
+        />
+        <Bar dataKey="count" name="Findings" radius={[0, 4, 4, 0]} maxBarSize={20}>
+          {data.map((d) => (
+            <Cell key={d.severity} fill={SEVERITY_COLORS[d.severity]} />
+          ))}
+        </Bar>
+        <Tooltip content={ChartTooltip} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+function ScanStatusDonut({ scans }: { scans: { status: string }[] }) {
+  const statuses = ["completed", "running", "queued", "failed", "canceled"];
+  const data = statuses
+    .map((status) => ({ status, count: scans.filter((s) => s.status === status).length }))
+    .filter((d) => d.count > 0);
+
+  if (data.length === 0) {
+    return <p className="text-sm text-muted-foreground">No scans yet.</p>;
+  }
+
+  return (
+    <ResponsiveContainer width="100%" height={220}>
+      <PieChart>
+        <Pie data={data} dataKey="count" nameKey="status" innerRadius={55} outerRadius={80} paddingAngle={2}>
+          {data.map((d) => (
+            <Cell key={d.status} fill={scanStatusColor(d.status)} />
+          ))}
+        </Pie>
+        <Tooltip content={ChartTooltip} />
+      </PieChart>
+    </ResponsiveContainer>
+  );
+}
+
 export function DashboardPage() {
   const { data: assets, isLoading: assetsLoading } = useAssets();
   const { data: scans, isLoading: scansLoading } = useScans();
@@ -53,28 +121,11 @@ export function DashboardPage() {
 
   const runningScans = scans?.filter((s) => s.status === "queued" || s.status === "running").length ?? 0;
   const agentsOnline = agents?.filter((a) => a.status === "online").length ?? 0;
-  const nucleiCount = findings?.filter((f) => f.engine === "nuclei").length ?? 0;
-  const openvasCount = findings?.filter((f) => f.engine === "openvas").length ?? 0;
   const recentScans = scans?.slice(0, 5) ?? [];
 
   return (
     <div>
-      <PageHeader
-        title="Dashboard"
-        description="Operational overview of assets, scans, and agent presence."
-        action={
-          <div className="flex gap-2">
-            <Button variant="outline" render={<a href={api.reportCsvUrl()} />}>
-              <Download className="size-4" />
-              CSV
-            </Button>
-            <Button variant="outline" render={<a href={api.reportPdfUrl()} />}>
-              <FileText className="size-4" />
-              PDF
-            </Button>
-          </div>
-        }
-      />
+      <PageHeader title="Dashboard" description="Operational overview of assets, scans, and agent presence." />
 
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard icon={Server} label="Total assets" value={assets?.length ?? 0} loading={assetsLoading} />
@@ -153,53 +204,22 @@ export function DashboardPage() {
 
       <div className="mt-4 grid gap-4 md:grid-cols-2">
         <Card>
-          <CardHeader className="flex-row items-center justify-between space-y-0">
-            <CardTitle>Nuclei findings</CardTitle>
-            <span className="text-2xl font-semibold">
-              {findingsLoading ? <Skeleton className="h-7 w-8" /> : nucleiCount}
-            </span>
+          <CardHeader>
+            <CardTitle>Findings by severity</CardTitle>
           </CardHeader>
           <CardContent>
-            <SeverityBreakdown findings={findings?.filter((f) => f.engine === "nuclei") ?? []} />
+            {findingsLoading ? <Skeleton className="h-55 w-full" /> : <SeverityBarChart findings={findings ?? []} />}
           </CardContent>
         </Card>
         <Card>
-          <CardHeader className="flex-row items-center justify-between space-y-0">
-            <CardTitle>OpenVAS findings</CardTitle>
-            <span className="text-2xl font-semibold">
-              {findingsLoading ? <Skeleton className="h-7 w-8" /> : openvasCount}
-            </span>
+          <CardHeader>
+            <CardTitle>Scan status</CardTitle>
           </CardHeader>
           <CardContent>
-            <SeverityBreakdown findings={findings?.filter((f) => f.engine === "openvas") ?? []} />
+            {scansLoading ? <Skeleton className="h-55 w-full" /> : <ScanStatusDonut scans={scans ?? []} />}
           </CardContent>
         </Card>
       </div>
-    </div>
-  );
-}
-
-function SeverityBreakdown({ findings }: { findings: { severity: string }[] }) {
-  const order = ["Critical", "High", "Medium", "Low", "Informational"];
-  const counts = order.map((s) => ({
-    severity: s,
-    count: findings.filter((f) => f.severity === s).length,
-  }));
-
-  if (findings.length === 0) {
-    return <p className="text-sm text-muted-foreground">No findings yet.</p>;
-  }
-
-  return (
-    <div className="flex flex-wrap gap-2">
-      {counts
-        .filter((c) => c.count > 0)
-        .map((c) => (
-          <div key={c.severity} className="flex items-center gap-1.5">
-            <SeverityBadge severity={c.severity} />
-            <span className="text-sm text-muted-foreground">{c.count}</span>
-          </div>
-        ))}
     </div>
   );
 }
