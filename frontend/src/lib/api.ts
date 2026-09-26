@@ -21,6 +21,27 @@ class ApiError extends Error {
   }
 }
 
+// FastAPI's validation-error shape is a list of {loc, msg, type} objects —
+// never show that raw (or a JSON dump of it) in a toast. A pydantic
+// model_validator's plain `raise ValueError("...")` shows up here as
+// `msg: "Value error, <message>"`, so that prefix is stripped too.
+function humanizeErrorDetail(detail: unknown, fallback: string): string {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) => {
+        if (!item || typeof item !== "object" || !("msg" in item)) return null;
+        const msg = String((item as { msg: unknown }).msg).replace(/^Value error,\s*/, "");
+        const loc = (item as { loc?: unknown }).loc;
+        const path = Array.isArray(loc) ? loc.filter((p) => p !== "body").join(".") : "";
+        return path ? `${path}: ${msg}` : msg;
+      })
+      .filter((m): m is string => Boolean(m));
+    if (messages.length > 0) return messages.join("; ");
+  }
+  return fallback;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
     ...init,
@@ -34,7 +55,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     let detail = res.statusText;
     try {
       const body = await res.json();
-      detail = body?.detail ? JSON.stringify(body.detail) : detail;
+      if (body?.detail !== undefined) detail = humanizeErrorDetail(body.detail, detail);
     } catch {
       // ignore body parse failure
     }

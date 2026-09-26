@@ -4,6 +4,7 @@ import traceback
 from . import discovery, nuclei_runner, ssh_audit
 from .client import BackendClient
 from .config import Config
+from .errors import humanize_exception
 from .identity import load_or_register
 from .retry import with_retry
 
@@ -55,8 +56,9 @@ def handle_nuclei(client: BackendClient, cfg: Config, job: dict) -> None:
         except Exception as exc:
             # One unreachable/flaky target shouldn't sink the scan for
             # every other target in the job.
-            last_error = f"{target}: {exc}"
-            client.submit_target_result(se_id, t["asset_id"], status="failed", error_message=str(exc)[:2000])
+            friendly = humanize_exception(exc)
+            last_error = f"{target}: {friendly}"
+            client.submit_target_result(se_id, t["asset_id"], status="failed", error_message=friendly[:2000])
             continue
 
         any_success = True
@@ -118,7 +120,7 @@ def handle_openvas(client: BackendClient, cfg: Config, job: dict) -> None:
                     )
                 )
             except Exception as exc:
-                target_last_error = f"{host}: {exc}"
+                target_last_error = f"{host}: {humanize_exception(exc)}"
                 continue  # this credential just didn't work for this host — try the next one, not fatal
 
             target_succeeded = True
@@ -139,7 +141,9 @@ def handle_openvas(client: BackendClient, cfg: Config, job: dict) -> None:
         else:
             last_error = target_last_error
 
-    if any_success:
+    if not targets or any_success:
+        # No targets (e.g. discovery found nothing) is not a failure —
+        # there was simply nothing to audit, same as handle_nuclei.
         client.complete(se_id, status="completed")
     else:
         client.complete(
@@ -190,7 +194,7 @@ def run(cfg: Config) -> None:
         except Exception as exc:
             traceback.print_exc()
             try:
-                client.complete(se_id, status="failed", error_message=str(exc)[:2000])
+                client.complete(se_id, status="failed", error_message=humanize_exception(exc)[:2000])
             except Exception:
                 pass
 

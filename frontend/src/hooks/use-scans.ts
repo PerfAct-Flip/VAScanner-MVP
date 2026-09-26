@@ -47,9 +47,15 @@ export function useCreateScan() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (payload: ScanCreate) => api.createScan(payload),
-    onSuccess: () => {
+    onSuccess: (scan) => {
       queryClient.invalidateQueries({ queryKey: ["scans"] });
-      toast.success("Scan started — Nuclei and OpenVAS are now running in parallel");
+      toast.success("Scan started");
+      // Non-fatal heads-up (e.g. a target doesn't resolve via DNS, or
+      // OpenVAS was skipped for lack of a credential) — the scan still
+      // runs, this is just visibility, not an error.
+      for (const warning of scan.warnings ?? []) {
+        toast.warning(warning);
+      }
     },
     onError: (err: Error) => toast.error(`Failed to start scan: ${err.message}`),
   });

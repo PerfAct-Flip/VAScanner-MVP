@@ -296,19 +296,18 @@ def job_complete(
     # Discovery is only step one: once it lands, queue the actual scanning
     # engines against whatever it found (plus any pre-seeded assets), pinned
     # to the same agent that just ran discovery. Which engines follow
-    # depends on what was requested at scan creation (Scan.requested_engines)
-    # — legacy default (None) means "nuclei always, openvas only if
-    # credentials exist" so an uncredentialed scan never gets queued an
-    # SSH-audit job that's guaranteed to fail immediately.
+    # depends on what was requested at scan creation (Scan.requested_engines),
+    # but "openvas" is only ever queued if a credential is actually attached
+    # — whether that came from the legacy default or an explicit request —
+    # since without one it's guaranteed to fail immediately. (The caller
+    # already got a warning about this at scan-creation time if they asked
+    # for openvas with no credential; see POST /scans.)
     if se.engine == "discover" and se.status == "completed":
         scan = db.get(Scan, se.scan_id)
-        if scan.requested_engines is not None:
-            wanted = set(scan.requested_engines.split(","))
-            engine_names = [e for e in ("nuclei", "openvas") if e in wanted]
-        else:
-            engine_names = ["nuclei"]
-            if db.query(Credential).filter_by(scan_id=se.scan_id).first():
-                engine_names.append("openvas")
+        wanted = set(scan.requested_engines.split(",")) if scan.requested_engines is not None else {"nuclei", "openvas"}
+        engine_names = [e for e in ("nuclei",) if e in wanted]
+        if "openvas" in wanted and db.query(Credential).filter_by(scan_id=se.scan_id).first():
+            engine_names.append("openvas")
         for engine_name in engine_names:
             db.add(
                 ScanEngine(

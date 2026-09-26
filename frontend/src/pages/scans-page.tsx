@@ -93,12 +93,13 @@ function NewScanDialog() {
     }));
 
   const needsAssetsForNoDiscover = isInternal && !engines.discover && assetIds.length === 0;
-  const needsCredentialForOpenvas = isInternal && engines.openvas && validCredentials.length === 0;
+  // Not blocking: missing a credential for OpenVAS is a predictable,
+  // recoverable situation, not a reason to refuse the whole scan — the
+  // backend just skips that one engine and returns a warning explaining
+  // why, shown as a toast after submission.
+  const willSkipOpenvas = isInternal && engines.openvas && validCredentials.length === 0;
   const canSubmit =
-    (isInternal ? agentId !== "" : assetIds.length > 0) &&
-    selectedEngines.length > 0 &&
-    !needsAssetsForNoDiscover &&
-    !needsCredentialForOpenvas;
+    (isInternal ? agentId !== "" : assetIds.length > 0) && selectedEngines.length > 0 && !needsAssetsForNoDiscover;
 
   function toggleAsset(id: number, checked: boolean) {
     setAssetIds((prev) => (checked ? [...prev, id] : prev.filter((a) => a !== id)));
@@ -194,9 +195,10 @@ function NewScanDialog() {
                   Skipping Discovery requires pre-seeding at least one asset below.
                 </p>
               )}
-              {needsCredentialForOpenvas && (
-                <p className="text-xs text-destructive">
-                  OpenVAS / SSH Audit requires at least one credential below, or uncheck it.
+              {willSkipOpenvas && (
+                <p className="text-xs text-amber-600 dark:text-amber-500">
+                  No credential added below — OpenVAS / SSH Audit will be skipped for this scan rather than
+                  failing. Add one below if you want it to run, or ignore this to scan without it.
                 </p>
               )}
             </div>
@@ -275,7 +277,7 @@ function NewScanDialog() {
             {isInternal && (
               <div className="grid gap-2">
                 <div className="flex items-center justify-between">
-                  <Label>{engines.openvas ? "Credentials (required for OpenVAS / SSH Audit)" : "Credentials (optional)"}</Label>
+                  <Label>{engines.openvas ? "Credentials (needed for OpenVAS / SSH Audit)" : "Credentials (optional)"}</Label>
                   <Button
                     type="button"
                     variant="outline"
@@ -288,8 +290,8 @@ function NewScanDialog() {
                 </div>
                 <p className="text-xs text-muted-foreground">
                   Used for authenticated checks (SSH config, pending updates) against discovered
-                  hosts. Each credential is tried against every target — leave empty to skip
-                  (uncheck OpenVAS / SSH Audit above too, or the scan won't be submittable).
+                  hosts. Each credential is tried against every target — leave empty and OpenVAS /
+                  SSH Audit will just be skipped for this scan rather than failing.
                 </p>
                 {credentials.map((cred) => (
                   <div key={cred.id} className="grid grid-cols-[100px_1fr_1fr_80px_auto] gap-2 rounded-md border p-2">

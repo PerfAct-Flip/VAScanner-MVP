@@ -4,7 +4,15 @@ import time
 from app.config import settings
 from app.database import SessionLocal
 from app.models import Asset, Finding, ScanEngine, normalize_severity
-from app.scanning.common import is_cancelled, update_scan_status, utcnow, validate_target
+from app.scanning.common import (
+    already_succeeded_targets,
+    is_cancelled,
+    record_target_result,
+    update_scan_status,
+    utcnow,
+    validate_target,
+)
+from app.scanning.errors import humanize_exception
 
 
 def _wait_for_openvas_socket(se: ScanEngine, db) -> None:
@@ -212,9 +220,13 @@ def _run_openvas_scan(scan_id: int, asset_id: int, target: str, se: ScanEngine, 
 
 
 def run_openvas_engine(scan_id: int, asset_ids: list[int]) -> None:
-    """Runs OpenVAS against all scan targets independently. All exceptions are
-    caught and recorded on the ScanEngine row — never re-raised. A failure
-    here never affects the Nuclei engine."""
+    """Runs OpenVAS against all scan targets independently. One bad target
+    (DNS failure, GVM task error, target considered dead) is recorded and
+    skipped, never aborting the rest — a full user-initiated cancel
+    (_Canceled) is the one thing that still aborts everything. A retry only
+    re-attempts targets that didn't already succeed (see
+    already_succeeded_targets), so it never re-scans — or double-records
+    findings for — an asset that already passed."""
     db = SessionLocal()
     try:
         se = db.query(ScanEngine).filter_by(scan_id=scan_id, engine="openvas").first()
@@ -228,8 +240,12 @@ def run_openvas_engine(scan_id: int, asset_ids: list[int]) -> None:
         db.commit()
 
         final_status = "completed"
+        any_success = bool(already_succeeded_targets(db, se.id))
+        last_error: str | None = None
         try:
-            for asset_id in asset_ids:
+            remaining = [aid for aid in asset_ids if aid not in already_succeeded_targets(db, se.id)]
+
+            for asset_id in remaining:
                 if is_cancelled(scan_id):
                     final_status = "canceled"
                     break
@@ -241,22 +257,40 @@ def run_openvas_engine(scan_id: int, asset_ids: list[int]) -> None:
                 if not target:
                     continue
 
-                validate_target(target)
-                _run_openvas_scan(scan_id, asset_id, target, se, db)
+                try:
+                    validate_target(target)
+                    _run_openvas_scan(scan_id, asset_id, target, se, db)
+                except _Canceled:
+                    raise
+                except Exception as exc:
+                    db.rollback()
+                    last_error = humanize_exception(exc)
+                    record_target_result(db, se.id, asset_id, "failed", last_error)
+                    db.commit()
+                    continue
+
+                any_success = True
+                record_target_result(db, se.id, asset_id, "succeeded")
+                db.commit()
 
             if final_status == "completed":
-                se.progress = "OpenVAS scan completed"
-                se.progress_pct = 100
+                final_status = "completed" if (not asset_ids or any_success) else "failed"
+                if final_status == "completed":
+                    se.progress = "OpenVAS scan completed"
+                    se.progress_pct = 100
+                else:
+                    se.progress = "Failed"
+                    se.error_message = last_error
             else:
                 se.progress = "Canceled by user"
         except _Canceled:
             db.rollback()
             final_status = "canceled"
             se.progress = "Canceled by user"
-        except Exception as exc:  # noqa: BLE001 - deliberately broad, recorded not raised
+        except Exception as exc:  # noqa: BLE001 - deliberately broad: a structural failure, not a per-target one
             db.rollback()
             final_status = "failed"
-            se.error_message = str(exc)
+            se.error_message = humanize_exception(exc)
             se.progress = "Failed"
         finally:
             se.finished_at = utcnow()

@@ -68,11 +68,11 @@ class ScanCreate(BaseModel):
     agent_id: int | None = None
     credentials: list[CredentialCreate] = []
     # Which engines to run. Omit entirely (None) to get the legacy default
-    # set for this scan type — for internal scans that means "openvas" is
-    # silently skipped with no credentials, matching existing behavior;
-    # an explicit list here is a deliberate choice and fails loudly instead
-    # (see validate_by_type) if it doesn't make sense (e.g. openvas with no
-    # credential attached).
+    # set for this scan type. Selecting "openvas" with no credential is
+    # deliberately NOT rejected here — it's a predictable, recoverable
+    # situation (see create_scan/job_complete), not a hard error: the engine
+    # is just quietly not queued, and the response's `warnings` list tells
+    # the caller why instead of the scan failing outright.
     engines: list[ScanEngineChoice] | None = None
 
     @model_validator(mode="after")
@@ -84,8 +84,6 @@ class ScanCreate(BaseModel):
             if not self.agent_id:
                 raise ValueError("agent_id is required for internal scans (the on-site Presence Agent to run it).")
             if self.engines is not None:
-                if "openvas" in self.engines and not self.credentials:
-                    raise ValueError("openvas (SSH audit) requires at least one credential.")
                 if "discover" not in self.engines and not self.asset_ids:
                     raise ValueError("asset_ids must be provided when 'discover' is not among the selected engines.")
         else:
@@ -123,6 +121,11 @@ class ScanOut(BaseModel):
     created_at: datetime
     requested_engines: str | None
     engines: list[ScanEngineOut] = []
+    # Non-fatal heads-up about this scan (e.g. "OpenVAS needs a credential
+    # to run and was skipped", "example.com does not resolve via DNS right
+    # now") — never populated from the ORM object, only set by the endpoint
+    # that creates/returns a scan, and empty for every other read of a scan.
+    warnings: list[str] = []
 
 
 class ScanEngineStatusOut(BaseModel):

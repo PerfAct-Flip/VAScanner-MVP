@@ -43,6 +43,7 @@ export interface Scan {
   created_at: string;
   requested_engines: string | null;
   engines: ScanEngine[];
+  warnings: string[];
 }
 
 export type CredentialType = "ssh" | "winrm" | "snmp";

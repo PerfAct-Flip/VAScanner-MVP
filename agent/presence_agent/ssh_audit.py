@@ -2,6 +2,7 @@ import re
 
 import paramiko
 
+from .errors import humanize_exception
 from .retry import TransientError
 
 _WEAK_CIPHERS = ("arcfour", "cbc", "3des", "blowfish", "des")
@@ -61,7 +62,7 @@ def audit_host(host: str, username: str, secret: str, port: int | None, timeout:
         # Connection refused/reset, no route, timed out negotiating — on a
         # network with flaky links or a host mid-DHCP-renewal this can be
         # transient rather than "this host doesn't take SSH."
-        raise TransientError(f"Could not reach {host} over SSH: {exc}") from exc
+        raise TransientError(humanize_exception(exc)) from exc
 
     findings: list[dict] = []
     try:

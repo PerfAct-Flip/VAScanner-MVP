@@ -2,8 +2,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
-from app.models import Agent, Asset, Credential, Finding, Scan, ScanEngine, ScanTarget
-from app.scanning.common import clear_cancel, request_cancel
+from app.models import Agent, Asset, Credential, Finding, Scan, ScanEngine, ScanEngineTarget, ScanTarget
+from app.scanning.common import clear_cancel, dns_resolves, request_cancel
 from app.scanning.crypto import encrypt_secret
 from app.scanning.orchestrator import ENGINES, execute_scan, retry_external_engines
 from app.schemas import FindingOut, ScanCreate, ScanEngineStatusOut, ScanFindingsOut, ScanOut, ScanStatusOut
@@ -24,6 +24,8 @@ def create_scan(payload: ScanCreate, background_tasks: BackgroundTasks, db: Sess
         if not agent or agent.type != "internal":
             raise HTTPException(status_code=404, detail=f"Unknown internal agent_id: {payload.agent_id}")
 
+    warnings: list[str] = []
+
     scan = Scan(
         type=payload.type,
         status="queued",
@@ -34,6 +36,17 @@ def create_scan(payload: ScanCreate, background_tasks: BackgroundTasks, db: Sess
 
     for asset_id in payload.asset_ids:
         db.add(ScanTarget(scan_id=scan.id, asset_id=asset_id))
+
+    # Predictable failure conditions are surfaced as a warning up front and
+    # handled gracefully, not left to blow up an engine mid-scan: a target
+    # hostname that doesn't currently resolve, or "openvas" requested with
+    # no credential attached (that engine just isn't queued at all in that
+    # case — see the "internal" branch below, and job_complete for the
+    # equivalent default-engines case once discovery finishes).
+    for a in assets:
+        target = a.hostname or a.ip_address
+        if target and not dns_resolves(target):
+            warnings.append(f"'{target}' does not currently resolve via DNS — scans against it may fail.")
 
     if payload.type == "external":
         selected = payload.engines if payload.engines is not None else list(ENGINES)
@@ -50,6 +63,11 @@ def create_scan(payload: ScanCreate, background_tasks: BackgroundTasks, db: Sess
         # non-empty by ScanCreate in that case).
         run_discover = payload.engines is None or "discover" in payload.engines
         if run_discover:
+            wants_openvas = payload.engines is None or "openvas" in payload.engines
+            if wants_openvas and not payload.credentials:
+                warnings.append(
+                    "OpenVAS / SSH Audit needs a credential to run — it will be skipped once discovery completes."
+                )
             db.add(
                 ScanEngine(
                     scan_id=scan.id,
@@ -61,7 +79,13 @@ def create_scan(payload: ScanCreate, background_tasks: BackgroundTasks, db: Sess
                 )
             )
         else:
+            has_credentials = bool(payload.credentials)
             for engine_name in payload.engines:
+                if engine_name == "openvas" and not has_credentials:
+                    warnings.append(
+                        "OpenVAS / SSH Audit needs a credential to run — it was not queued for this scan."
+                    )
+                    continue
                 db.add(
                     ScanEngine(
                         scan_id=scan.id,
@@ -90,12 +114,13 @@ def create_scan(payload: ScanCreate, background_tasks: BackgroundTasks, db: Sess
     # Internal: this just flips the scan to 'running' — the agent does the work.
     background_tasks.add_task(execute_scan, scan.id, list(found_ids))
 
-    return (
+    result = (
         db.query(Scan)
         .options(joinedload(Scan.engines))
         .filter(Scan.id == scan.id)
         .first()
     )
+    return ScanOut.model_validate(result).model_copy(update={"warnings": warnings})
 
 
 @router.get("", response_model=list[ScanOut])
@@ -183,12 +208,26 @@ def retry_scan(scan_id: int, background_tasks: BackgroundTasks, db: Session = De
     scan = db.query(Scan).options(joinedload(Scan.engines)).filter(Scan.id == scan_id).first()
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
-    if scan.status != "failed":
-        raise HTTPException(status_code=409, detail=f"Only failed scans can be retried (current status: '{scan.status}')")
+    if scan.status not in ("failed", "completed"):
+        raise HTTPException(status_code=409, detail=f"Scan cannot be retried in status '{scan.status}'")
 
-    failed_engines = [se for se in scan.engines if se.status == "failed"]
+    # An engine can be "completed" overall (some target succeeded) while
+    # still having per-target failures recorded (a DNS blip on one host
+    # among ten) — that's not surfaced as a scary engine-level failure, but
+    # it should still be retryable, so check ScanEngineTarget too, not just
+    # ScanEngine.status.
+    partially_failed_engine_ids = {
+        row.scan_engine_id
+        for row in (
+            db.query(ScanEngineTarget.scan_engine_id)
+            .join(ScanEngine, ScanEngine.id == ScanEngineTarget.scan_engine_id)
+            .filter(ScanEngine.scan_id == scan_id, ScanEngineTarget.status == "failed")
+            .distinct()
+        )
+    }
+    failed_engines = [se for se in scan.engines if se.status == "failed" or se.id in partially_failed_engine_ids]
     if not failed_engines:
-        raise HTTPException(status_code=409, detail="No failed engines to retry")
+        raise HTTPException(status_code=409, detail="No failed engines or targets to retry")
 
     # Reset only the engines that actually failed — one already-completed
     # (e.g. Nuclei succeeded, only OpenVAS failed) is left untouched, so a
