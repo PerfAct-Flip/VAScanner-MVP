@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
 from app.models import Agent, Asset, Credential, Finding, Scan, ScanEngine, ScanEngineTarget, ScanTarget
-from app.scanning.common import clear_cancel, dns_resolves, request_cancel
+from app.scanning.common import agent_is_online, clear_cancel, dns_resolves, reap_stale_engines, request_cancel
 from app.scanning.crypto import encrypt_secret
 from app.scanning.orchestrator import ENGINES, execute_scan, retry_external_engines
 from app.schemas import FindingOut, ScanCreate, ScanEngineStatusOut, ScanFindingsOut, ScanOut, ScanStatusOut
@@ -25,6 +25,12 @@ def create_scan(payload: ScanCreate, background_tasks: BackgroundTasks, db: Sess
             raise HTTPException(status_code=404, detail=f"Unknown internal agent_id: {payload.agent_id}")
 
     warnings: list[str] = []
+
+    if payload.type == "internal" and not agent_is_online(agent):
+        warnings.append(
+            f"Presence Agent '{agent.name}' hasn't checked in recently and may be offline — "
+            "this scan will wait and start automatically once it reconnects."
+        )
 
     scan = Scan(
         type=payload.type,
@@ -139,11 +145,13 @@ def create_scan(payload: ScanCreate, background_tasks: BackgroundTasks, db: Sess
 
 @router.get("", response_model=list[ScanOut])
 def list_scans(db: Session = Depends(get_db)):
+    reap_stale_engines(db)
     return db.query(Scan).options(joinedload(Scan.engines)).order_by(Scan.created_at.desc()).all()
 
 
 @router.get("/{scan_id}", response_model=ScanOut)
 def get_scan(scan_id: int, db: Session = Depends(get_db)):
+    reap_stale_engines(db)
     scan = db.query(Scan).options(joinedload(Scan.engines)).filter(Scan.id == scan_id).first()
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
@@ -152,6 +160,7 @@ def get_scan(scan_id: int, db: Session = Depends(get_db)):
 
 @router.get("/{scan_id}/status", response_model=ScanStatusOut)
 def scan_status(scan_id: int, db: Session = Depends(get_db)):
+    reap_stale_engines(db)
     scan = db.get(Scan, scan_id)
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")

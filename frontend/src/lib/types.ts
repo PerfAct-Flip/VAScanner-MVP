@@ -140,4 +140,5 @@ export interface Agent {
   type: string;
   status: string;
   last_seen: string;
+  online: boolean;
 }

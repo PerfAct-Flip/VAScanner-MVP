@@ -28,6 +28,59 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# The presence agent authenticates on every poll (every ~5s idle) and on
+# every per-target progress update during a job, so a genuinely healthy
+# agent's last_seen almost never drifts past this. Used only for the
+# informational "online"/"offline" badge — never to block scan creation,
+# since an agent that's merely asleep right now may still come back.
+AGENT_ONLINE_THRESHOLD_SECONDS = 90
+
+# Deliberately much larger than AGENT_ONLINE_THRESHOLD_SECONDS: a single
+# slow target (e.g. nuclei stuck on one unresponsive host) can legitimately
+# delay the next progress update for a few minutes without the agent being
+# dead. Only past this point is a 'running' job safe to assume orphaned.
+AGENT_DEAD_THRESHOLD_SECONDS = 600
+
+
+def agent_is_online(agent) -> bool:
+    return (utcnow() - agent.last_seen).total_seconds() <= AGENT_ONLINE_THRESHOLD_SECONDS
+
+
+def reap_stale_engines(db) -> None:
+    """A 'running' ScanEngine pinned to an agent that's gone quiet for
+    AGENT_DEAD_THRESHOLD_SECONDS is almost certainly orphaned — the agent
+    crashed, lost network, or was powered off mid-job. Without this check,
+    such a scan sits at 'running' forever with no error, and (per
+    retry_scan's status gate of failed/completed) could never even be
+    retried. Checked lazily on read rather than via a background scheduler,
+    since there's no scheduler in this app."""
+    from app.models import Agent, ScanEngine
+
+    stuck = (
+        db.query(ScanEngine)
+        .join(Agent, ScanEngine.agent_id == Agent.id)
+        .filter(ScanEngine.status == "running")
+        .all()
+    )
+    touched_scan_ids: set[int] = set()
+    now = utcnow()
+    for se in stuck:
+        agent = db.get(Agent, se.agent_id)
+        if agent and (now - agent.last_seen).total_seconds() > AGENT_DEAD_THRESHOLD_SECONDS:
+            se.status = "failed"
+            se.error_message = (
+                f"Lost contact with the on-site agent '{agent.name}' while this was running — "
+                "it appears to have gone offline. Retry once it reconnects."
+            )
+            se.finished_at = now
+            touched_scan_ids.add(se.scan_id)
+
+    if touched_scan_ids:
+        db.commit()
+        for scan_id in touched_scan_ids:
+            update_scan_status(scan_id, db)
+
+
 def _strip_port(target: str) -> str:
     """Targets are sometimes given as 'host:port' (e.g. a non-standard HTTP
     port on an internal test box) — that whole string is neither a literal

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, computed_field, field_validator, model_validator
 
 EngineName = Literal["nuclei", "openvas"]
 ScanType = Literal["internal", "external"]
@@ -244,6 +244,16 @@ class AgentOut(BaseModel):
     type: str
     status: str
     last_seen: datetime
+
+    @computed_field
+    @property
+    def online(self) -> bool:
+        # `status` only ever gets flipped to "online" on auth and is never
+        # flipped back — it can't be trusted to mean "still alive right
+        # now". This is computed fresh from last_seen on every read instead.
+        from app.scanning.common import agent_is_online
+
+        return agent_is_online(self)
 
 
 class AgentRegisterOut(AgentOut):

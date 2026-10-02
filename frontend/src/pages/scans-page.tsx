@@ -98,6 +98,10 @@ function NewScanDialog() {
   // backend just skips that one engine and returns a warning explaining
   // why, shown as a toast after submission.
   const willSkipOpenvas = isInternal && engines.openvas && validCredentials.length === 0;
+  // Also not blocking: an offline agent may just be asleep right now — the
+  // scan is queued and will start automatically once it reconnects, same
+  // as the backend's own warning on submit.
+  const selectedAgentOffline = isInternal && agentId !== "" && internalAgents.find((a) => String(a.id) === agentId)?.online === false;
   const canSubmit =
     (isInternal ? agentId !== "" : assetIds.length > 0) && selectedEngines.length > 0 && !needsAssetsForNoDiscover;
 
@@ -221,11 +225,17 @@ function NewScanDialog() {
                     <SelectContent>
                       {internalAgents.map((agent) => (
                         <SelectItem key={agent.id} value={String(agent.id)}>
-                          {agent.name} · {agent.status}
+                          {agent.name} · {agent.online ? "online" : "offline"}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
+                )}
+                {selectedAgentOffline && (
+                  <p className="text-xs text-amber-600 dark:text-amber-500">
+                    This agent hasn't checked in recently and may be offline — the scan will queue and
+                    start automatically once it reconnects.
+                  </p>
                 )}
               </div>
             )}
