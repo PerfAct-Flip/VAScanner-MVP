@@ -202,7 +202,7 @@ export function ScanDetailPage() {
     (a, b) => engineOrder.indexOf(a.engine) - engineOrder.indexOf(b.engine),
   );
   const canCancel = scan.status === "queued" || scan.status === "running";
-  const canRetry = scan.status === "failed";
+  const canRetry = scan.retryable;
   const hasDiscover = scan.type === "internal" && engines.some((e) => e.engine === "discover");
   const assetsById = new Map((assets ?? []).map((a) => [a.id, a]));
 

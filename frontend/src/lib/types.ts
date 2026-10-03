@@ -44,6 +44,7 @@ export interface Scan {
   requested_engines: string | null;
   engines: ScanEngine[];
   warnings: string[];
+  retryable: boolean;
 }
 
 export type CredentialType = "ssh" | "winrm" | "snmp";

@@ -11,6 +11,28 @@ from app.schemas import AssetOut, FindingOut, ScanCreate, ScanEngineStatusOut, S
 router = APIRouter(prefix="/api/v1/scans", tags=["scans"])
 
 
+def _failed_engines(db: Session, scan: Scan) -> list[ScanEngine]:
+    """Engines eligible for retry: outright failed, or 'completed' overall
+    (some target succeeded) while still having per-target failures recorded
+    — e.g. a DNS blip on one host among ten. Shared by the retry endpoint
+    (which needs the actual rows to reset) and the read endpoints (which
+    only need to know whether a Retry button should show at all)."""
+    partially_failed_engine_ids = {
+        row.scan_engine_id
+        for row in (
+            db.query(ScanEngineTarget.scan_engine_id)
+            .join(ScanEngine, ScanEngine.id == ScanEngineTarget.scan_engine_id)
+            .filter(ScanEngine.scan_id == scan.id, ScanEngineTarget.status == "failed")
+            .distinct()
+        )
+    }
+    return [se for se in scan.engines if se.status == "failed" or se.id in partially_failed_engine_ids]
+
+
+def _is_retryable(db: Session, scan: Scan) -> bool:
+    return scan.status in ("failed", "completed") and bool(_failed_engines(db, scan))
+
+
 @router.post("", response_model=ScanOut, status_code=201)
 def create_scan(payload: ScanCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     assets = db.query(Asset).filter(Asset.id.in_(payload.asset_ids)).all()
@@ -146,7 +168,11 @@ def create_scan(payload: ScanCreate, background_tasks: BackgroundTasks, db: Sess
 @router.get("", response_model=list[ScanOut])
 def list_scans(db: Session = Depends(get_db)):
     reap_stale_engines(db)
-    return db.query(Scan).options(joinedload(Scan.engines)).order_by(Scan.created_at.desc()).all()
+    scans = db.query(Scan).options(joinedload(Scan.engines)).order_by(Scan.created_at.desc()).all()
+    return [
+        ScanOut.model_validate(s).model_copy(update={"retryable": _is_retryable(db, s)})
+        for s in scans
+    ]
 
 
 @router.get("/{scan_id}", response_model=ScanOut)
@@ -155,7 +181,7 @@ def get_scan(scan_id: int, db: Session = Depends(get_db)):
     scan = db.query(Scan).options(joinedload(Scan.engines)).filter(Scan.id == scan_id).first()
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
-    return scan
+    return ScanOut.model_validate(scan).model_copy(update={"retryable": _is_retryable(db, scan)})
 
 
 @router.get("/{scan_id}/status", response_model=ScanStatusOut)
@@ -252,21 +278,7 @@ def retry_scan(scan_id: int, background_tasks: BackgroundTasks, db: Session = De
     if scan.status not in ("failed", "completed"):
         raise HTTPException(status_code=409, detail=f"Scan cannot be retried in status '{scan.status}'")
 
-    # An engine can be "completed" overall (some target succeeded) while
-    # still having per-target failures recorded (a DNS blip on one host
-    # among ten) — that's not surfaced as a scary engine-level failure, but
-    # it should still be retryable, so check ScanEngineTarget too, not just
-    # ScanEngine.status.
-    partially_failed_engine_ids = {
-        row.scan_engine_id
-        for row in (
-            db.query(ScanEngineTarget.scan_engine_id)
-            .join(ScanEngine, ScanEngine.id == ScanEngineTarget.scan_engine_id)
-            .filter(ScanEngine.scan_id == scan_id, ScanEngineTarget.status == "failed")
-            .distinct()
-        )
-    }
-    failed_engines = [se for se in scan.engines if se.status == "failed" or se.id in partially_failed_engine_ids]
+    failed_engines = _failed_engines(db, scan)
     if not failed_engines:
         raise HTTPException(status_code=409, detail="No failed engines or targets to retry")
 

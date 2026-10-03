@@ -126,6 +126,13 @@ class ScanOut(BaseModel):
     # now") — never populated from the ORM object, only set by the endpoint
     # that creates/returns a scan, and empty for every other read of a scan.
     warnings: list[str] = []
+    # Whether POST /{id}/retry would currently accept this scan — true for
+    # an outright failed engine, but also for a scan that's "completed"
+    # overall while still having per-target failures recorded (a DNS blip
+    # on one host among ten). Never derivable from `status` alone, so it's
+    # computed server-side (see app.routers.scans._is_retryable) rather
+    # than left for the frontend to reimplement the same logic.
+    retryable: bool = False
 
 
 class ScanEngineStatusOut(BaseModel):

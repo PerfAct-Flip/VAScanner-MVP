@@ -420,7 +420,7 @@ export function ScansPage() {
                       </TableCell>
                       <TableCell>
                         <div className="flex justify-end gap-2">
-                          {scan.status === "failed" && (
+                          {scan.retryable && (
                             <Button
                               variant="outline"
                               size="sm"
