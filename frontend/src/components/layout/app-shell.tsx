@@ -55,14 +55,20 @@ export function AppShell() {
         </div>
       </aside>
 
-      <div className="flex min-h-screen flex-1 flex-col">
+      <div className="flex min-h-screen min-w-0 flex-1 flex-col">
         <header className="flex items-center justify-between border-b bg-background px-4 py-3 md:hidden">
           <div className="flex items-center gap-2">
             <ShieldAlert className="size-5 text-primary" />
             <span className="font-semibold">Vuln Scanner</span>
           </div>
         </header>
-        <main className="flex-1 p-4 md:p-8">
+        {/* min-w-0 is required here: a flex item's default min-width is
+            "auto" (content-based), not 0, so a wide descendant (a table
+            with a long unwrapped string, a grid with bare 1fr tracks)
+            would otherwise stretch this whole column — and the page with
+            it — instead of being clipped/scrolled internally by its own
+            overflow-x-auto. */}
+        <main className="min-w-0 flex-1 p-4 md:p-8">
           <Outlet />
         </main>
       </div>

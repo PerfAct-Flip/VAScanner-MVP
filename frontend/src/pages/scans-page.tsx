@@ -304,7 +304,10 @@ function NewScanDialog() {
                   SSH Audit will just be skipped for this scan rather than failing.
                 </p>
                 {credentials.map((cred) => (
-                  <div key={cred.id} className="grid grid-cols-[100px_1fr_1fr_80px_auto] gap-2 rounded-md border p-2">
+                  <div
+                    key={cred.id}
+                    className="grid grid-cols-[100px_minmax(0,1fr)_minmax(0,1fr)_80px_auto] gap-2 rounded-md border p-2"
+                  >
                     <Select
                       value={cred.type}
                       onValueChange={(v) => updateCredential(cred.id, { type: (v ?? "ssh") as CredentialType })}
