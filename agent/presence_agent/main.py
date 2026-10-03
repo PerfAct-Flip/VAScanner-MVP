@@ -39,7 +39,14 @@ def handle_nuclei(client: BackendClient, cfg: Config, job: dict) -> None:
     any_success = False
     last_error: str | None = None
     for i, t in enumerate(targets, start=1):
-        target = t.get("hostname") or t.get("ip_address")
+        # IP preferred over hostname (same as handle_openvas below): a
+        # transient DNS hiccup inside nuclei's own resolver can make it
+        # permanently blacklist a hostname target mid-scan ("found
+        # unresponsive permanently: no address found for host") and
+        # silently return zero findings for the rest of that host —
+        # confirmed by repeated live testing. An IP target has no DNS step
+        # to flake on.
+        target = t.get("ip_address") or t.get("hostname")
         if not target:
             continue
 

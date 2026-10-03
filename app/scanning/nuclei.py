@@ -204,7 +204,14 @@ def run_nuclei_engine(scan_id: int, asset_ids: list[int]) -> None:
                 asset = db.get(Asset, asset_id)
                 if not asset:
                     continue
-                target = asset.hostname or asset.ip_address
+                # IP preferred over hostname (same as the OpenVAS engine):
+                # a transient DNS hiccup inside nuclei's own resolver can
+                # make it permanently blacklist a hostname target mid-scan
+                # ("found unresponsive permanently: no address found for
+                # host") and silently return zero findings for the rest of
+                # that host — confirmed by repeated live testing. An IP
+                # target has no DNS step to flake on.
+                target = asset.ip_address or asset.hostname
                 if not target:
                     continue
 
