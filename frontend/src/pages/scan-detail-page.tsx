@@ -112,7 +112,7 @@ export function ScanDetailPage() {
   const { id } = useParams();
   const scanId = Number(id);
   const { data: scan, isLoading } = useScan(scanId);
-  const { data: findings } = useScanFindings(scanId);
+  const { data: findings } = useScanFindings(scanId, scan?.status);
   const cancelScan = useCancelScan();
   const retryScan = useRetryScan();
 

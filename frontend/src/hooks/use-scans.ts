@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 
 import { api } from "@/lib/api";
@@ -35,11 +36,30 @@ export function useScanStatus(id: number) {
   });
 }
 
-export function useScanFindings(id: number) {
+export function useScanFindings(id: number, scanStatus?: string) {
+  const queryClient = useQueryClient();
+  // Findings only show up once a scan finishes, but this query had no
+  // polling at all — a scan completing while the detail page was open
+  // never refreshed it, so the only way to see results was a manual
+  // reload. Poll alongside the scan's own status while it's active; once
+  // it goes terminal, fire one last refetch to catch the final batch of
+  // findings that may have been written just before the status flipped
+  // (polling stops the instant isActive goes false, so without this the
+  // very last write could still be missed).
+  const wasActive = useRef(false);
+  useEffect(() => {
+    const active = !!scanStatus && isActive(scanStatus);
+    if (!active && wasActive.current) {
+      queryClient.invalidateQueries({ queryKey: ["scans", id, "findings"] });
+    }
+    wasActive.current = active;
+  }, [scanStatus, id, queryClient]);
+
   return useQuery({
     queryKey: ["scans", id, "findings"],
     queryFn: () => api.getScanFindings(id),
     enabled: Number.isFinite(id),
+    refetchInterval: scanStatus && isActive(scanStatus) ? 4000 : false,
   });
 }
 
