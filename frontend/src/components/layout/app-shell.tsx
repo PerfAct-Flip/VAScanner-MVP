@@ -24,7 +24,12 @@ const NAV_ITEMS = [
 
 export function AppShell() {
   return (
-    <div className="flex min-h-screen w-full bg-muted/30">
+    // h-screen + overflow-hidden pins this to the viewport so the sidebar
+    // never scrolls with page content — only <main> below scrolls. Without
+    // this, min-h-screen lets the whole document grow past 100vh on a tall
+    // page, and the sidebar (normal document flow, not fixed/sticky)
+    // scrolls away with everything else instead of staying put.
+    <div className="flex h-screen w-full overflow-hidden bg-muted/30">
       <aside className="hidden w-60 shrink-0 border-r bg-background md:flex md:flex-col">
         <div className="flex items-center gap-2 border-b px-6 py-5">
           <ShieldAlert className="size-6 text-primary" />
@@ -55,20 +60,21 @@ export function AppShell() {
         </div>
       </aside>
 
-      <div className="flex min-h-screen min-w-0 flex-1 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center justify-between border-b bg-background px-4 py-3 md:hidden">
           <div className="flex items-center gap-2">
             <ShieldAlert className="size-5 text-primary" />
             <span className="font-semibold">Vuln Scanner</span>
           </div>
         </header>
-        {/* min-w-0 is required here: a flex item's default min-width is
-            "auto" (content-based), not 0, so a wide descendant (a table
-            with a long unwrapped string, a grid with bare 1fr tracks)
-            would otherwise stretch this whole column — and the page with
-            it — instead of being clipped/scrolled internally by its own
-            overflow-x-auto. */}
-        <main className="min-w-0 flex-1 p-4 md:p-8">
+        {/* The only scrolling region in the shell (overflow-y-auto) — pairs
+            with h-screen/overflow-hidden on the root div above. min-w-0 is
+            required too: a flex item's default min-width is "auto"
+            (content-based), not 0, so a wide descendant (a table with a
+            long unwrapped string, a grid with bare 1fr tracks) would
+            otherwise stretch this whole column instead of being
+            clipped/scrolled internally by its own overflow-x-auto. */}
+        <main className="min-w-0 flex-1 overflow-y-auto p-4 md:p-8">
           <Outlet />
         </main>
       </div>
