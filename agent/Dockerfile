@@ -9,13 +9,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Nuclei is baked into this image as a pinned, verified binary — same approach
 # as the backend's own Dockerfile — so it never depends on the host's PATH.
+# The bake step below must run `-ut` WITHOUT `-duc` — confirmed empirically
+# against nuclei v3.11.1 that `-ut -duc` together silently install nothing
+# (no output, no error, no templates), while `-ut` alone installs correctly.
+# Scan time (nuclei_runner.py) is the only place `-duc` belongs; this
+# one-time bake needs the real network check to actually fetch templates,
+# or the image ships with none and every scan fails with "no templates
+# provided for scan".
 ARG NUCLEI_VERSION=3.11.1
 RUN curl -fsSL -o /tmp/nuclei.zip \
     "https://github.com/projectdiscovery/nuclei/releases/download/v${NUCLEI_VERSION}/nuclei_${NUCLEI_VERSION}_linux_amd64.zip" \
     && unzip -o /tmp/nuclei.zip -d /usr/local/bin nuclei \
     && chmod +x /usr/local/bin/nuclei \
     && rm /tmp/nuclei.zip \
-    && nuclei -duc -ut  # bake templates into the image so scans don't need network access to GitHub at runtime
+    && nuclei -ut
 
 COPY --from=ghcr.io/astral-sh/uv:0.12.7 /uv /uvx /usr/local/bin/
 
