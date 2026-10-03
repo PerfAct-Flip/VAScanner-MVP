@@ -73,7 +73,7 @@ function EngineCard({
   );
 }
 
-function FindingsTable({ findings }: { findings: Finding[] }) {
+function FindingsTable({ findings, assetsById }: { findings: Finding[]; assetsById: Map<number, Asset> }) {
   if (findings.length === 0) {
     return (
       <div className="p-10 text-center text-sm text-muted-foreground">
@@ -93,33 +93,50 @@ function FindingsTable({ findings }: { findings: Finding[] }) {
         </TableRow>
       </TableHeader>
       <TableBody>
-        {findings.map((f) => (
-          <TableRow key={f.id}>
-            <TableCell className="text-muted-foreground">#{f.asset_id}</TableCell>
-            <TableCell>
-              <SeverityBadge severity={f.severity} />
-            </TableCell>
-            <TableCell>{f.cve ?? "—"}</TableCell>
-            <TableCell className="max-w-md">{f.description ?? "—"}</TableCell>
-            <TableCell className="max-w-md">{f.recommendation ?? "—"}</TableCell>
-          </TableRow>
-        ))}
+        {findings.map((f) => {
+          const asset = assetsById.get(f.asset_id);
+          const label = asset ? (asset.hostname ?? asset.ip_address ?? `#${f.asset_id}`) : `#${f.asset_id}`;
+          return (
+            <TableRow key={f.id}>
+              <TableCell className="text-muted-foreground">
+                {label}
+                {asset?.hostname && asset.ip_address && (
+                  <span className="ml-1 text-xs">({asset.ip_address})</span>
+                )}
+              </TableCell>
+              <TableCell>
+                <SeverityBadge severity={f.severity} />
+              </TableCell>
+              <TableCell>{f.cve ?? "—"}</TableCell>
+              <TableCell className="max-w-md">{f.description ?? "—"}</TableCell>
+              <TableCell className="max-w-md">{f.recommendation ?? "—"}</TableCell>
+            </TableRow>
+          );
+        })}
       </TableBody>
     </Table>
   );
 }
 
-function DiscoveredHostsCard({ assets }: { assets: Asset[] | undefined }) {
+function ScannedAssetsCard({
+  assets,
+  title,
+  emptyMessage,
+}: {
+  assets: Asset[] | undefined;
+  title: string;
+  emptyMessage: string;
+}) {
   return (
     <Card className="mb-6">
       <CardHeader>
-        <CardTitle>Discovered Hosts ({assets?.length ?? 0})</CardTitle>
+        <CardTitle>
+          {title} ({assets?.length ?? 0})
+        </CardTitle>
       </CardHeader>
       <CardContent className="p-0">
         {!assets || assets.length === 0 ? (
-          <p className="px-6 pb-6 text-sm text-muted-foreground">
-            No hosts found yet — this fills in live as Discovery runs.
-          </p>
+          <p className="px-6 pb-6 text-sm text-muted-foreground">{emptyMessage}</p>
         ) : (
           <Table>
             <TableHeader>
@@ -178,6 +195,7 @@ export function ScanDetailPage() {
   const canCancel = scan.status === "queued" || scan.status === "running";
   const canRetry = scan.status === "failed";
   const hasDiscover = scan.type === "internal" && engines.some((e) => e.engine === "discover");
+  const assetsById = new Map((assets ?? []).map((a) => [a.id, a]));
 
   return (
     <div>
@@ -247,7 +265,15 @@ export function ScanDetailPage() {
         ))}
       </div>
 
-      {hasDiscover && <DiscoveredHostsCard assets={assets} />}
+      <ScannedAssetsCard
+        assets={assets}
+        title={hasDiscover ? "Discovered Hosts" : "Target Assets"}
+        emptyMessage={
+          hasDiscover
+            ? "No hosts found yet — this fills in live as Discovery runs."
+            : "No target assets recorded for this scan."
+        }
+      />
 
       <Card>
         <CardHeader>
@@ -264,10 +290,10 @@ export function ScanDetailPage() {
               </TabsTrigger>
             </TabsList>
             <TabsContent value="nuclei">
-              <FindingsTable findings={findings?.nuclei ?? []} />
+              <FindingsTable findings={findings?.nuclei ?? []} assetsById={assetsById} />
             </TabsContent>
             <TabsContent value="openvas">
-              <FindingsTable findings={findings?.openvas ?? []} />
+              <FindingsTable findings={findings?.openvas ?? []} assetsById={assetsById} />
             </TabsContent>
           </Tabs>
         </CardContent>
