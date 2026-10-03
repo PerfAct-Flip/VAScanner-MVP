@@ -1,6 +1,7 @@
 import { ArrowLeft, Download, FileText, RotateCcw, XCircle } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
 
+import { IdentityBadge } from "@/components/identity-badge";
 import { ReportsPanel } from "@/components/reports-panel";
 import { SeverityBadge } from "@/components/severity-badge";
 import { StatusBadge } from "@/components/status-badge";
@@ -17,9 +18,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useCancelScan, useRetryScan, useScan, useScanFindings } from "@/hooks/use-scans";
+import { useCancelScan, useRetryScan, useScan, useScanAssets, useScanFindings } from "@/hooks/use-scans";
 import { api } from "@/lib/api";
-import type { Finding } from "@/lib/types";
+import type { Asset, Finding } from "@/lib/types";
 
 function EngineCard({
   name,
@@ -108,11 +109,56 @@ function FindingsTable({ findings }: { findings: Finding[] }) {
   );
 }
 
+function DiscoveredHostsCard({ assets }: { assets: Asset[] | undefined }) {
+  return (
+    <Card className="mb-6">
+      <CardHeader>
+        <CardTitle>Discovered Hosts ({assets?.length ?? 0})</CardTitle>
+      </CardHeader>
+      <CardContent className="p-0">
+        {!assets || assets.length === 0 ? (
+          <p className="px-6 pb-6 text-sm text-muted-foreground">
+            No hosts found yet — this fills in live as Discovery runs.
+          </p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Host</TableHead>
+                <TableHead>IP address</TableHead>
+                <TableHead>MAC address</TableHead>
+                <TableHead>Identity</TableHead>
+                <TableHead>Open ports</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {assets.map((asset) => (
+                <TableRow key={asset.id}>
+                  <TableCell>{asset.hostname ?? "—"}</TableCell>
+                  <TableCell className="font-mono text-xs">{asset.ip_address ?? "—"}</TableCell>
+                  <TableCell className="font-mono text-xs">{asset.mac_address ?? "—"}</TableCell>
+                  <TableCell>
+                    <IdentityBadge confidence={asset.identity_confidence} />
+                  </TableCell>
+                  <TableCell className="font-mono text-xs">
+                    {asset.open_ports?.split(",").join(", ") ?? "—"}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function ScanDetailPage() {
   const { id } = useParams();
   const scanId = Number(id);
   const { data: scan, isLoading } = useScan(scanId);
   const { data: findings } = useScanFindings(scanId, scan?.status);
+  const { data: assets } = useScanAssets(scanId, scan?.status);
   const cancelScan = useCancelScan();
   const retryScan = useRetryScan();
 
@@ -131,6 +177,7 @@ export function ScanDetailPage() {
   );
   const canCancel = scan.status === "queued" || scan.status === "running";
   const canRetry = scan.status === "failed";
+  const hasDiscover = scan.type === "internal" && engines.some((e) => e.engine === "discover");
 
   return (
     <div>
@@ -199,6 +246,8 @@ export function ScanDetailPage() {
           />
         ))}
       </div>
+
+      {hasDiscover && <DiscoveredHostsCard assets={assets} />}
 
       <Card>
         <CardHeader>

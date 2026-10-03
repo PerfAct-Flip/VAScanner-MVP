@@ -63,6 +63,29 @@ export function useScanFindings(id: number, scanStatus?: string) {
   });
 }
 
+export function useScanAssets(id: number, scanStatus?: string) {
+  const queryClient = useQueryClient();
+  // Same reasoning as useScanFindings above: Discovery adds hosts live as
+  // it finds them, so this needs to poll while the scan is running, not
+  // just fetch once — plus one more refetch right after completion to
+  // catch the last host(s) found just before the status flipped.
+  const wasActive = useRef(false);
+  useEffect(() => {
+    const active = !!scanStatus && isActive(scanStatus);
+    if (!active && wasActive.current) {
+      queryClient.invalidateQueries({ queryKey: ["scans", id, "assets"] });
+    }
+    wasActive.current = active;
+  }, [scanStatus, id, queryClient]);
+
+  return useQuery({
+    queryKey: ["scans", id, "assets"],
+    queryFn: () => api.getScanAssets(id),
+    enabled: Number.isFinite(id),
+    refetchInterval: scanStatus && isActive(scanStatus) ? 4000 : false,
+  });
+}
+
 export function useCreateScan() {
   const queryClient = useQueryClient();
   return useMutation({

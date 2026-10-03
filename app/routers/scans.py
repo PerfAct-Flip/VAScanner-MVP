@@ -6,7 +6,7 @@ from app.models import Agent, Asset, Credential, Finding, Scan, ScanEngine, Scan
 from app.scanning.common import agent_is_online, clear_cancel, dns_resolves, reap_stale_engines, request_cancel
 from app.scanning.crypto import encrypt_secret
 from app.scanning.orchestrator import ENGINES, execute_scan, retry_external_engines
-from app.schemas import FindingOut, ScanCreate, ScanEngineStatusOut, ScanFindingsOut, ScanOut, ScanStatusOut
+from app.schemas import AssetOut, FindingOut, ScanCreate, ScanEngineStatusOut, ScanFindingsOut, ScanOut, ScanStatusOut
 
 router = APIRouter(prefix="/api/v1/scans", tags=["scans"])
 
@@ -195,6 +195,24 @@ def scan_findings(scan_id: int, db: Session = Depends(get_db)):
         scan_id=scan_id,
         nuclei=[FindingOut.model_validate(f) for f in nuclei],
         openvas=[FindingOut.model_validate(f) for f in openvas],
+    )
+
+
+@router.get("/{scan_id}/assets", response_model=list[AssetOut])
+def scan_assets(scan_id: int, db: Session = Depends(get_db)):
+    """Hosts in scope for this scan — for an internal scan with Discovery
+    enabled, this is populated live as the agent finds hosts, not just the
+    assets pre-seeded at creation time."""
+    scan = db.get(Scan, scan_id)
+    if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found")
+
+    return (
+        db.query(Asset)
+        .join(ScanTarget, ScanTarget.asset_id == Asset.id)
+        .filter(ScanTarget.scan_id == scan_id)
+        .order_by(Asset.ip_address)
+        .all()
     )
 
 
