@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import { IdentityBadge } from "@/components/identity-badge";
 import { ReportsPanel } from "@/components/reports-panel";
 import { SeverityBadge } from "@/components/severity-badge";
+import { SeverityBarChart } from "@/components/severity-bar-chart";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -98,18 +99,26 @@ function FindingsTable({ findings, assetsById }: { findings: Finding[]; assetsBy
           const label = asset ? (asset.hostname ?? asset.ip_address ?? `#${f.asset_id}`) : `#${f.asset_id}`;
           return (
             <TableRow key={f.id}>
-              <TableCell className="text-muted-foreground">
+              <TableCell className="align-top text-muted-foreground whitespace-nowrap">
                 {label}
                 {asset?.hostname && asset.ip_address && (
                   <span className="ml-1 text-xs">({asset.ip_address})</span>
                 )}
               </TableCell>
-              <TableCell>
+              <TableCell className="align-top whitespace-nowrap">
                 <SeverityBadge severity={f.severity} />
               </TableCell>
-              <TableCell>{f.cve ?? "—"}</TableCell>
-              <TableCell className="max-w-md">{f.description ?? "—"}</TableCell>
-              <TableCell className="max-w-md">{f.recommendation ?? "—"}</TableCell>
+              <TableCell className="align-top whitespace-nowrap">{f.cve ?? "—"}</TableCell>
+              {/* Overrides the table's default whitespace-nowrap, which doesn't
+                  truncate long text — it just lets it visually bleed into the
+                  next column. A fixed width + normal wrapping keeps these two
+                  long-text columns from overlapping each other. */}
+              <TableCell className="w-64 max-w-64 align-top wrap-break-word whitespace-normal">
+                {f.description ?? "—"}
+              </TableCell>
+              <TableCell className="w-64 max-w-64 align-top wrap-break-word whitespace-normal">
+                {f.recommendation ?? "—"}
+              </TableCell>
             </TableRow>
           );
         })}
@@ -296,6 +305,26 @@ export function ScanDetailPage() {
               <FindingsTable findings={findings?.openvas ?? []} assetsById={assetsById} />
             </TabsContent>
           </Tabs>
+        </CardContent>
+      </Card>
+
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle>Findings by Severity</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-6 md:grid-cols-2">
+          <div>
+            <p className="mb-2 text-sm font-medium text-muted-foreground">
+              Nuclei ({findings?.nuclei.length ?? 0})
+            </p>
+            <SeverityBarChart findings={findings?.nuclei ?? []} />
+          </div>
+          <div>
+            <p className="mb-2 text-sm font-medium text-muted-foreground">
+              OpenVAS ({findings?.openvas.length ?? 0})
+            </p>
+            <SeverityBarChart findings={findings?.openvas ?? []} />
+          </div>
         </CardContent>
       </Card>
 

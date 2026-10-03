@@ -1,19 +1,10 @@
 import { Radar, ScanLine, Server, ShieldAlert } from "lucide-react";
 import { Link } from "react-router-dom";
-import {
-  Bar,
-  BarChart,
-  Cell,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 
 import { ChartTooltip } from "@/components/chart-tooltip";
 import { PageHeader } from "@/components/page-header";
+import { SeverityBarChart } from "@/components/severity-bar-chart";
 import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,7 +13,7 @@ import { useAgents } from "@/hooks/use-agents";
 import { useAssets } from "@/hooks/use-assets";
 import { useFindings } from "@/hooks/use-findings";
 import { useScans } from "@/hooks/use-scans";
-import { SEVERITY_COLORS, SEVERITY_ORDER, scanStatusColor } from "@/lib/chart-colors";
+import { scanStatusColor } from "@/lib/chart-colors";
 import { cn } from "@/lib/utils";
 
 function StatCard({
@@ -52,40 +43,6 @@ function StatCard({
         </div>
       </CardContent>
     </Card>
-  );
-}
-
-function SeverityBarChart({ findings }: { findings: { severity: string }[] }) {
-  const data = SEVERITY_ORDER.map((severity) => ({
-    severity,
-    count: findings.filter((f) => f.severity === severity).length,
-  })).filter((d) => d.count > 0);
-
-  if (data.length === 0) {
-    return <p className="text-sm text-muted-foreground">No findings yet.</p>;
-  }
-
-  return (
-    <ResponsiveContainer width="100%" height={220}>
-      <BarChart data={data} layout="vertical" margin={{ left: 8, right: 24 }}>
-        <XAxis type="number" allowDecimals={false} tick={{ fontSize: 12 }} stroke="var(--muted-foreground)" />
-        <YAxis
-          type="category"
-          dataKey="severity"
-          width={90}
-          tick={{ fontSize: 12 }}
-          stroke="var(--muted-foreground)"
-          tickLine={false}
-          axisLine={false}
-        />
-        <Bar dataKey="count" name="Findings" radius={[0, 4, 4, 0]} maxBarSize={20}>
-          {data.map((d) => (
-            <Cell key={d.severity} fill={SEVERITY_COLORS[d.severity]} />
-          ))}
-        </Bar>
-        <Tooltip content={ChartTooltip} />
-      </BarChart>
-    </ResponsiveContainer>
   );
 }
 
